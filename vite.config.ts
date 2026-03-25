@@ -1,0 +1,48 @@
+import react from '@vitejs/plugin-react';
+import path from 'path';
+import {defineConfig, loadEnv} from 'vite';
+
+export default defineConfig(({mode}) => {
+  const env = loadEnv(mode, '.', '');
+  return {
+    plugins: [react()],
+    define: {
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    },
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, '.'),
+      },
+    },
+    server: {
+      host: '0.0.0.0',
+      port: 5173,
+      strictPort: false,
+      // HMR is disabled in AI Studio via DISABLE_HMR env var.
+      // Do not modify – file watching is disabled to prevent flickering during agent edits.
+      hmr: process.env.DISABLE_HMR !== 'true' ? {
+        port: 24678,
+        clientPort: 24678,
+      } : false,
+      cors: true,
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/n8n-webhook': {
+          target: 'https://n8n.realtechprint.com',
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/n8n-webhook/, '/webhook')
+        },
+      },
+    },
+    preview: {
+      host: '0.0.0.0',
+      port: 3000,
+      strictPort: true,
+    },
+  };
+});

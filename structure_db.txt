@@ -1,0 +1,1448 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict WK9PsyImWKG9abrZQWBiBU5YDHdV8oYXcosEBnacbNECt6Jcgj5xpLBiaV3mQ1n
+
+-- Dumped from database version 16.13
+-- Dumped by pg_dump version 17.8
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: public; Type: SCHEMA; Schema: -; Owner: gestionapp
+--
+
+-- *not* creating schema, since initdb creates it
+
+
+ALTER SCHEMA public OWNER TO gestionapp;
+
+--
+-- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+
+
+--
+-- Name: set_updated_at(); Type: FUNCTION; Schema: public; Owner: gestionapp
+--
+
+CREATE FUNCTION public.set_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+
+BEGIN
+
+  NEW.updated_at = now();
+
+  RETURN NEW;
+
+END;
+
+$$;
+
+
+ALTER FUNCTION public.set_updated_at() OWNER TO gestionapp;
+
+--
+-- Name: sync_messages_limit(); Type: FUNCTION; Schema: public; Owner: gestionapp
+--
+
+CREATE FUNCTION public.sync_messages_limit() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+
+BEGIN
+
+  IF NEW.plan_id IS DISTINCT FROM OLD.plan_id THEN
+
+    SELECT p.messages_limit INTO NEW.messages_limit
+
+    FROM public.plans p
+
+    WHERE p.id = NEW.plan_id;
+
+  END IF;
+
+  RETURN NEW;
+
+END;
+
+$$;
+
+
+ALTER FUNCTION public.sync_messages_limit() OWNER TO gestionapp;
+
+--
+-- Name: update_conversation_on_message(); Type: FUNCTION; Schema: public; Owner: gestionapp
+--
+
+CREATE FUNCTION public.update_conversation_on_message() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+
+BEGIN
+
+  UPDATE public.conversations
+
+  SET
+
+    message_count = message_count + 1,
+
+    last_message  = LEFT(NEW.content, 200),
+
+    updated_at    = now()
+
+  WHERE id = NEW.conversation_id;
+
+  RETURN NEW;
+
+END;
+
+$$;
+
+
+ALTER FUNCTION public.update_conversation_on_message() OWNER TO gestionapp;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: connection_data; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.connection_data (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    connection_id uuid NOT NULL,
+    external_id text NOT NULL,
+    data_type text NOT NULL,
+    title text,
+    content jsonb NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    external_created_at timestamp with time zone,
+    external_updated_at timestamp with time zone,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.connection_data OWNER TO gestionapp;
+
+--
+-- Name: contacts; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.contacts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    google_id text,
+    name text NOT NULL,
+    first_name text,
+    last_name text,
+    email text,
+    phone text,
+    company text,
+    "position" text,
+    avatar text,
+    notes text,
+    tags text[] DEFAULT '{}'::text[] NOT NULL,
+    groups text[] DEFAULT '{}'::text[] NOT NULL,
+    synced_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.contacts OWNER TO gestionapp;
+
+--
+-- Name: conversations; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.conversations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    title text,
+    last_message text,
+    message_count integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.conversations OWNER TO gestionapp;
+
+--
+-- Name: error_logs; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.error_logs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    error_type text NOT NULL,
+    error_message text,
+    context jsonb,
+    resolved boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.error_logs OWNER TO gestionapp;
+
+--
+-- Name: finance_categories; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.finance_categories (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    name text NOT NULL,
+    type text DEFAULT 'both'::text NOT NULL,
+    color text,
+    icon text,
+    is_default boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT finance_categories_type_check CHECK ((type = ANY (ARRAY['income'::text, 'expense'::text, 'both'::text])))
+);
+
+
+ALTER TABLE public.finance_categories OWNER TO gestionapp;
+
+--
+-- Name: finance_goals; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.finance_goals (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    type text DEFAULT 'revenue'::text NOT NULL,
+    target numeric(12,2) NOT NULL,
+    period text DEFAULT 'monthly'::text NOT NULL,
+    start_date date DEFAULT CURRENT_DATE NOT NULL,
+    end_date date,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT finance_goals_period_check CHECK ((period = ANY (ARRAY['weekly'::text, 'monthly'::text, 'quarterly'::text, 'yearly'::text]))),
+    CONSTRAINT finance_goals_target_check CHECK ((target > (0)::numeric)),
+    CONSTRAINT finance_goals_type_check CHECK ((type = ANY (ARRAY['revenue'::text, 'expense'::text, 'profit'::text])))
+);
+
+
+ALTER TABLE public.finance_goals OWNER TO gestionapp;
+
+--
+-- Name: messages; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.messages (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    conversation_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    role text NOT NULL,
+    content text NOT NULL,
+    agent_used text,
+    tokens_used integer DEFAULT 0 NOT NULL,
+    feedback smallint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT messages_agent_used_check CHECK ((agent_used = ANY (ARRAY['email'::text, 'calendar'::text, 'contacts'::text, 'finance'::text, 'search'::text, 'rag'::text, 'general'::text]))),
+    CONSTRAINT messages_feedback_check CHECK ((feedback = ANY (ARRAY['-1'::integer, 1]))),
+    CONSTRAINT messages_role_check CHECK ((role = ANY (ARRAY['user'::text, 'assistant'::text])))
+);
+
+
+ALTER TABLE public.messages OWNER TO gestionapp;
+
+--
+-- Name: payments; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.payments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    subscription_id uuid,
+    stripe_payment_intent_id text,
+    amount integer NOT NULL,
+    currency text DEFAULT 'EUR'::text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT payments_amount_check CHECK ((amount >= 0)),
+    CONSTRAINT payments_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text])))
+);
+
+
+ALTER TABLE public.payments OWNER TO gestionapp;
+
+--
+-- Name: plans; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.plans (
+    id text NOT NULL,
+    name text NOT NULL,
+    description text,
+    price integer DEFAULT 0 NOT NULL,
+    currency text DEFAULT 'EUR'::text NOT NULL,
+    billing_interval text DEFAULT 'monthly'::text NOT NULL,
+    trial_days integer DEFAULT 0 NOT NULL,
+    agents_limit integer DEFAULT 1 NOT NULL,
+    messages_limit integer DEFAULT 500 NOT NULL,
+    features jsonb DEFAULT '[]'::jsonb NOT NULL,
+    limits jsonb DEFAULT '{}'::jsonb NOT NULL,
+    stripe_price_id text,
+    popular boolean DEFAULT false NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT plans_billing_interval_check CHECK ((billing_interval = ANY (ARRAY['monthly'::text, 'yearly'::text])))
+);
+
+
+ALTER TABLE public.plans OWNER TO gestionapp;
+
+--
+-- Name: profiles; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.profiles (
+    id uuid NOT NULL,
+    first_name text,
+    last_name text,
+    avatar_url text,
+    role text DEFAULT 'user'::text NOT NULL,
+    plan_id text DEFAULT 'starter'::text NOT NULL,
+    messages_used integer DEFAULT 0 NOT NULL,
+    messages_limit integer DEFAULT 500 NOT NULL,
+    subscription_status text DEFAULT 'active'::text NOT NULL,
+    stripe_customer_id text,
+    google_access_token text,
+    google_refresh_token text,
+    google_token_expiry timestamp with time zone,
+    google_scopes text[] DEFAULT '{}'::text[] NOT NULL,
+    preferences jsonb DEFAULT '{"language": "Français", "timezone": "Europe/Paris", "work_type": null, "bouba_tone": "professional", "notifications": {"weekly_report": true, "daily_briefing": true, "important_emails": true}}'::jsonb NOT NULL,
+    onboarding_complete boolean DEFAULT false NOT NULL,
+    onboarding_step integer DEFAULT 0 NOT NULL,
+    last_active_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    company text,
+    phone text,
+    website text,
+    work_type text DEFAULT 'entrepreneur'::text,
+    timezone text DEFAULT 'Europe/Paris (GMT+1)'::text,
+    language text DEFAULT 'Français'::text,
+    CONSTRAINT profiles_onboarding_step_check CHECK (((onboarding_step >= 0) AND (onboarding_step <= 4))),
+    CONSTRAINT profiles_role_check CHECK ((role = ANY (ARRAY['user'::text, 'admin'::text, 'superadmin'::text]))),
+    CONSTRAINT profiles_subscription_status_check CHECK ((subscription_status = ANY (ARRAY['active'::text, 'inactive'::text, 'cancelled'::text, 'past_due'::text])))
+);
+
+
+ALTER TABLE public.profiles OWNER TO gestionapp;
+
+--
+-- Name: subscriptions; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.subscriptions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    plan_id text NOT NULL,
+    stripe_subscription_id text,
+    status text DEFAULT 'active'::text NOT NULL,
+    current_period_start timestamp with time zone,
+    current_period_end timestamp with time zone,
+    cancel_at_period_end boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT subscriptions_status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text, 'cancelled'::text, 'past_due'::text, 'trialing'::text])))
+);
+
+
+ALTER TABLE public.subscriptions OWNER TO gestionapp;
+
+--
+-- Name: sync_logs; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.sync_logs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    connection_id uuid NOT NULL,
+    sync_type text NOT NULL,
+    status text NOT NULL,
+    items_processed integer DEFAULT 0 NOT NULL,
+    items_added integer DEFAULT 0 NOT NULL,
+    items_updated integer DEFAULT 0 NOT NULL,
+    items_deleted integer DEFAULT 0 NOT NULL,
+    error_details jsonb,
+    duration_ms integer,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT sync_logs_status_check CHECK ((status = ANY (ARRAY['success'::text, 'error'::text, 'partial'::text]))),
+    CONSTRAINT sync_logs_sync_type_check CHECK ((sync_type = ANY (ARRAY['emails'::text, 'calendar'::text, 'contacts'::text, 'airtable'::text, 'full'::text])))
+);
+
+
+ALTER TABLE public.sync_logs OWNER TO gestionapp;
+
+--
+-- Name: synced_airtable_records; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.synced_airtable_records (
+    id text NOT NULL,
+    user_id uuid NOT NULL,
+    base_id text NOT NULL,
+    table_name text NOT NULL,
+    record_data jsonb NOT NULL,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.synced_airtable_records OWNER TO gestionapp;
+
+--
+-- Name: transactions; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.transactions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    type text NOT NULL,
+    amount numeric(12,2) NOT NULL,
+    category_id uuid NOT NULL,
+    description text,
+    date timestamp with time zone DEFAULT now() NOT NULL,
+    status text DEFAULT 'completed'::text NOT NULL,
+    airtable_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT transactions_amount_check CHECK ((amount > (0)::numeric)),
+    CONSTRAINT transactions_status_check CHECK ((status = ANY (ARRAY['completed'::text, 'pending'::text]))),
+    CONSTRAINT transactions_type_check CHECK ((type = ANY (ARRAY['income'::text, 'expense'::text])))
+);
+
+
+ALTER TABLE public.transactions OWNER TO gestionapp;
+
+--
+-- Name: usage_tracking; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.usage_tracking (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    date date DEFAULT CURRENT_DATE NOT NULL,
+    messages_used integer DEFAULT 0 NOT NULL,
+    agent_calls jsonb DEFAULT '{"rag": 0, "email": 0, "search": 0, "finance": 0, "general": 0, "calendar": 0, "contacts": 0}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.usage_tracking OWNER TO gestionapp;
+
+--
+-- Name: user_activities; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.user_activities (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    action text NOT NULL,
+    details jsonb,
+    "timestamp" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.user_activities OWNER TO gestionapp;
+
+--
+-- Name: user_calendar_events; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.user_calendar_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    event_id text NOT NULL,
+    calendar_id text DEFAULT 'primary'::text NOT NULL,
+    title text NOT NULL,
+    start_at timestamp with time zone NOT NULL,
+    end_at timestamp with time zone NOT NULL,
+    location text,
+    description text,
+    category text,
+    participants jsonb DEFAULT '[]'::jsonb NOT NULL,
+    meeting_link text,
+    is_recurring boolean DEFAULT false NOT NULL,
+    recurrence_rule text,
+    status text DEFAULT 'confirmed'::text NOT NULL,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_calendar_events_status_check CHECK ((status = ANY (ARRAY['confirmed'::text, 'tentative'::text, 'cancelled'::text])))
+);
+
+
+ALTER TABLE public.user_calendar_events OWNER TO gestionapp;
+
+--
+-- Name: user_connections; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.user_connections (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    connection_id text NOT NULL,
+    connection_name text NOT NULL,
+    status text DEFAULT 'disconnected'::text NOT NULL,
+    category text NOT NULL,
+    connected_email text,
+    access_token text,
+    refresh_token text,
+    token_expires_at timestamp with time zone,
+    scopes text[] DEFAULT '{}'::text[] NOT NULL,
+    connection_data jsonb DEFAULT '{}'::jsonb NOT NULL,
+    sync_settings jsonb DEFAULT '{}'::jsonb NOT NULL,
+    auto_sync_enabled boolean DEFAULT true NOT NULL,
+    sync_frequency_minutes integer DEFAULT 30 NOT NULL,
+    sync_requested_at timestamp with time zone,
+    last_sync timestamp with time zone,
+    sync_count integer DEFAULT 0 NOT NULL,
+    error_message text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_connections_category_check CHECK ((category = ANY (ARRAY['Communication'::text, 'Productivité'::text, 'Données'::text]))),
+    CONSTRAINT user_connections_status_check CHECK ((status = ANY (ARRAY['connected'::text, 'disconnected'::text, 'connecting'::text, 'error'::text, 'expired'::text])))
+);
+
+
+ALTER TABLE public.user_connections OWNER TO gestionapp;
+
+--
+-- Name: user_emails; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.user_emails (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    connection_id text NOT NULL,
+    gmail_id text NOT NULL,
+    thread_id text,
+    from_email text NOT NULL,
+    from_name text DEFAULT ''::text NOT NULL,
+    to_email text NOT NULL,
+    subject text DEFAULT '(Sans objet)'::text NOT NULL,
+    body text DEFAULT ''::text NOT NULL,
+    snippet text,
+    html_body text,
+    email_date timestamp with time zone NOT NULL,
+    read boolean DEFAULT false NOT NULL,
+    starred boolean DEFAULT false NOT NULL,
+    is_urgent boolean DEFAULT false NOT NULL,
+    labels text[] DEFAULT '{}'::text[] NOT NULL,
+    folder text DEFAULT 'inbox'::text NOT NULL,
+    attachments jsonb DEFAULT '[]'::jsonb NOT NULL,
+    in_reply_to text,
+    message_id text,
+    raw_headers jsonb DEFAULT '{}'::jsonb NOT NULL,
+    summary text,
+    synced_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_emails_folder_check CHECK ((folder = ANY (ARRAY['inbox'::text, 'sent'::text, 'drafts'::text, 'archive'::text, 'trash'::text])))
+);
+
+
+ALTER TABLE public.user_emails OWNER TO gestionapp;
+
+--
+-- Name: users; Type: TABLE; Schema: public; Owner: gestionapp
+--
+
+CREATE TABLE public.users (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    email text NOT NULL,
+    email_verified boolean DEFAULT false NOT NULL,
+    name text,
+    image text,
+    provider text DEFAULT 'google'::text NOT NULL,
+    provider_id text,
+    password_hash text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT users_provider_check CHECK ((provider = ANY (ARRAY['google'::text, 'email'::text, 'magic_link'::text])))
+);
+
+
+ALTER TABLE public.users OWNER TO gestionapp;
+
+--
+-- Name: connection_data connection_data_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.connection_data
+    ADD CONSTRAINT connection_data_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contacts contacts_google_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.contacts
+    ADD CONSTRAINT contacts_google_unique UNIQUE (user_id, google_id);
+
+
+--
+-- Name: contacts contacts_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.contacts
+    ADD CONSTRAINT contacts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: conversations conversations_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.conversations
+    ADD CONSTRAINT conversations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: error_logs error_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.error_logs
+    ADD CONSTRAINT error_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: finance_categories finance_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.finance_categories
+    ADD CONSTRAINT finance_categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: finance_categories finance_categories_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.finance_categories
+    ADD CONSTRAINT finance_categories_unique UNIQUE (user_id, name);
+
+
+--
+-- Name: finance_goals finance_goals_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.finance_goals
+    ADD CONSTRAINT finance_goals_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: messages messages_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payments payments_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payments payments_stripe_payment_intent_id_key; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_stripe_payment_intent_id_key UNIQUE (stripe_payment_intent_id);
+
+
+--
+-- Name: plans plans_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.plans
+    ADD CONSTRAINT plans_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: profiles profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: profiles profiles_stripe_customer_id_key; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_stripe_customer_id_key UNIQUE (stripe_customer_id);
+
+
+--
+-- Name: subscriptions subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.subscriptions
+    ADD CONSTRAINT subscriptions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: subscriptions subscriptions_stripe_subscription_id_key; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.subscriptions
+    ADD CONSTRAINT subscriptions_stripe_subscription_id_key UNIQUE (stripe_subscription_id);
+
+
+--
+-- Name: sync_logs sync_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.sync_logs
+    ADD CONSTRAINT sync_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: synced_airtable_records synced_airtable_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.synced_airtable_records
+    ADD CONSTRAINT synced_airtable_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: transactions transactions_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.transactions
+    ADD CONSTRAINT transactions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: usage_tracking usage_tracking_day_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.usage_tracking
+    ADD CONSTRAINT usage_tracking_day_unique UNIQUE (user_id, date);
+
+
+--
+-- Name: usage_tracking usage_tracking_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.usage_tracking
+    ADD CONSTRAINT usage_tracking_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_activities user_activities_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_activities
+    ADD CONSTRAINT user_activities_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_calendar_events user_calendar_events_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_calendar_events
+    ADD CONSTRAINT user_calendar_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_calendar_events user_calendar_events_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_calendar_events
+    ADD CONSTRAINT user_calendar_events_unique UNIQUE (user_id, event_id);
+
+
+--
+-- Name: user_connections user_connections_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_connections
+    ADD CONSTRAINT user_connections_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_connections user_connections_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_connections
+    ADD CONSTRAINT user_connections_unique UNIQUE (user_id, connection_id);
+
+
+--
+-- Name: user_emails user_emails_gmail_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_emails
+    ADD CONSTRAINT user_emails_gmail_unique UNIQUE (user_id, gmail_id);
+
+
+--
+-- Name: user_emails user_emails_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_emails
+    ADD CONSTRAINT user_emails_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: users users_email_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_email_unique UNIQUE (email);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: users users_provider_unique; Type: CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_provider_unique UNIQUE (provider, provider_id);
+
+
+--
+-- Name: idx_calendar_range; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_calendar_range ON public.user_calendar_events USING btree (user_id, start_at, end_at);
+
+
+--
+-- Name: idx_calendar_start; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_calendar_start ON public.user_calendar_events USING btree (user_id, start_at);
+
+
+--
+-- Name: idx_calendar_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_calendar_user ON public.user_calendar_events USING btree (user_id);
+
+
+--
+-- Name: idx_contacts_company; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_contacts_company ON public.contacts USING btree (user_id, company);
+
+
+--
+-- Name: idx_contacts_email; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_contacts_email ON public.contacts USING btree (user_id, email);
+
+
+--
+-- Name: idx_contacts_user_id; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_contacts_user_id ON public.contacts USING btree (user_id);
+
+
+--
+-- Name: idx_conversations_updated; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_conversations_updated ON public.conversations USING btree (user_id, updated_at DESC);
+
+
+--
+-- Name: idx_conversations_user_id; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_conversations_user_id ON public.conversations USING btree (user_id);
+
+
+--
+-- Name: idx_emails_date; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_emails_date ON public.user_emails USING btree (user_id, email_date DESC);
+
+
+--
+-- Name: idx_emails_unread; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_emails_unread ON public.user_emails USING btree (user_id) WHERE (read = false);
+
+
+--
+-- Name: idx_emails_urgent; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_emails_urgent ON public.user_emails USING btree (user_id) WHERE (is_urgent = true);
+
+
+--
+-- Name: idx_emails_user_folder; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_emails_user_folder ON public.user_emails USING btree (user_id, folder);
+
+
+--
+-- Name: idx_error_logs_resolved; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_error_logs_resolved ON public.error_logs USING btree (resolved) WHERE (resolved = false);
+
+
+--
+-- Name: idx_error_logs_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_error_logs_user ON public.error_logs USING btree (user_id);
+
+
+--
+-- Name: idx_fin_categories_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_fin_categories_user ON public.finance_categories USING btree (user_id);
+
+
+--
+-- Name: idx_fin_goals_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_fin_goals_user ON public.finance_goals USING btree (user_id);
+
+
+--
+-- Name: idx_messages_conv_id; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_messages_conv_id ON public.messages USING btree (conversation_id);
+
+
+--
+-- Name: idx_messages_created_at; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_messages_created_at ON public.messages USING btree (conversation_id, created_at);
+
+
+--
+-- Name: idx_messages_user_id; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_messages_user_id ON public.messages USING btree (user_id);
+
+
+--
+-- Name: idx_payments_status; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_payments_status ON public.payments USING btree (status);
+
+
+--
+-- Name: idx_payments_user_id; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_payments_user_id ON public.payments USING btree (user_id);
+
+
+--
+-- Name: idx_profiles_last_active_at; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_profiles_last_active_at ON public.profiles USING btree (last_active_at DESC);
+
+
+--
+-- Name: idx_profiles_plan_id; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_profiles_plan_id ON public.profiles USING btree (plan_id);
+
+
+--
+-- Name: idx_profiles_role; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_profiles_role ON public.profiles USING btree (role);
+
+
+--
+-- Name: idx_subscriptions_status; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_subscriptions_status ON public.subscriptions USING btree (status);
+
+
+--
+-- Name: idx_subscriptions_user_id; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_subscriptions_user_id ON public.subscriptions USING btree (user_id);
+
+
+--
+-- Name: idx_sync_logs_conn; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_sync_logs_conn ON public.sync_logs USING btree (connection_id);
+
+
+--
+-- Name: idx_sync_logs_started; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_sync_logs_started ON public.sync_logs USING btree (started_at DESC);
+
+
+--
+-- Name: idx_sync_logs_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_sync_logs_user ON public.sync_logs USING btree (user_id);
+
+
+--
+-- Name: idx_transactions_category; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_transactions_category ON public.transactions USING btree (category_id);
+
+
+--
+-- Name: idx_transactions_date; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_transactions_date ON public.transactions USING btree (user_id, date DESC);
+
+
+--
+-- Name: idx_transactions_type; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_transactions_type ON public.transactions USING btree (user_id, type);
+
+
+--
+-- Name: idx_transactions_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_transactions_user ON public.transactions USING btree (user_id);
+
+
+--
+-- Name: idx_usage_user_date; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_usage_user_date ON public.usage_tracking USING btree (user_id, date DESC);
+
+
+--
+-- Name: idx_user_activities_ts; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_user_activities_ts ON public.user_activities USING btree ("timestamp" DESC);
+
+
+--
+-- Name: idx_user_activities_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_user_activities_user ON public.user_activities USING btree (user_id);
+
+
+--
+-- Name: idx_user_connections_status; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_user_connections_status ON public.user_connections USING btree (user_id, status);
+
+
+--
+-- Name: idx_user_connections_user; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_user_connections_user ON public.user_connections USING btree (user_id);
+
+
+--
+-- Name: idx_users_email; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_users_email ON public.users USING btree (email);
+
+
+--
+-- Name: idx_users_provider; Type: INDEX; Schema: public; Owner: gestionapp
+--
+
+CREATE INDEX idx_users_provider ON public.users USING btree (provider, provider_id);
+
+
+--
+-- Name: user_calendar_events trg_calendar_events_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_calendar_events_updated_at BEFORE UPDATE ON public.user_calendar_events FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: connection_data trg_connection_data_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_connection_data_updated_at BEFORE UPDATE ON public.connection_data FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: contacts trg_contacts_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_contacts_updated_at BEFORE UPDATE ON public.contacts FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: messages trg_messages_update_conversation; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_messages_update_conversation AFTER INSERT ON public.messages FOR EACH ROW EXECUTE FUNCTION public.update_conversation_on_message();
+
+
+--
+-- Name: payments trg_payments_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_payments_updated_at BEFORE UPDATE ON public.payments FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: profiles trg_profiles_sync_plan; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_profiles_sync_plan BEFORE UPDATE ON public.profiles FOR EACH ROW EXECUTE FUNCTION public.sync_messages_limit();
+
+
+--
+-- Name: profiles trg_profiles_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_profiles_updated_at BEFORE UPDATE ON public.profiles FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: subscriptions trg_subscriptions_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_subscriptions_updated_at BEFORE UPDATE ON public.subscriptions FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: synced_airtable_records trg_synced_airtable_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_synced_airtable_updated_at BEFORE UPDATE ON public.synced_airtable_records FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: usage_tracking trg_usage_tracking_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_usage_tracking_updated_at BEFORE UPDATE ON public.usage_tracking FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: user_connections trg_user_connections_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_user_connections_updated_at BEFORE UPDATE ON public.user_connections FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: user_emails trg_user_emails_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_user_emails_updated_at BEFORE UPDATE ON public.user_emails FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: users trg_users_updated_at; Type: TRIGGER; Schema: public; Owner: gestionapp
+--
+
+CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON public.users FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: connection_data connection_data_conn_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.connection_data
+    ADD CONSTRAINT connection_data_conn_fkey FOREIGN KEY (connection_id) REFERENCES public.user_connections(id) ON DELETE CASCADE;
+
+
+--
+-- Name: connection_data connection_data_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.connection_data
+    ADD CONSTRAINT connection_data_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: contacts contacts_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.contacts
+    ADD CONSTRAINT contacts_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: conversations conversations_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.conversations
+    ADD CONSTRAINT conversations_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: error_logs error_logs_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.error_logs
+    ADD CONSTRAINT error_logs_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: finance_categories finance_categories_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.finance_categories
+    ADD CONSTRAINT finance_categories_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: finance_goals finance_goals_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.finance_goals
+    ADD CONSTRAINT finance_goals_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: messages messages_conv_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_conv_fkey FOREIGN KEY (conversation_id) REFERENCES public.conversations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: messages messages_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: payments payments_sub_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_sub_fkey FOREIGN KEY (subscription_id) REFERENCES public.subscriptions(id) ON DELETE SET NULL;
+
+
+--
+-- Name: payments payments_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: profiles profiles_plan_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_plan_fkey FOREIGN KEY (plan_id) REFERENCES public.plans(id);
+
+
+--
+-- Name: profiles profiles_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_user_fkey FOREIGN KEY (id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: subscriptions subscriptions_plan_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.subscriptions
+    ADD CONSTRAINT subscriptions_plan_fkey FOREIGN KEY (plan_id) REFERENCES public.plans(id);
+
+
+--
+-- Name: subscriptions subscriptions_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.subscriptions
+    ADD CONSTRAINT subscriptions_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: sync_logs sync_logs_conn_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.sync_logs
+    ADD CONSTRAINT sync_logs_conn_fkey FOREIGN KEY (connection_id) REFERENCES public.user_connections(id) ON DELETE CASCADE;
+
+
+--
+-- Name: sync_logs sync_logs_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.sync_logs
+    ADD CONSTRAINT sync_logs_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: synced_airtable_records synced_airtable_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.synced_airtable_records
+    ADD CONSTRAINT synced_airtable_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: transactions transactions_cat_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.transactions
+    ADD CONSTRAINT transactions_cat_fkey FOREIGN KEY (category_id) REFERENCES public.finance_categories(id);
+
+
+--
+-- Name: transactions transactions_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.transactions
+    ADD CONSTRAINT transactions_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: usage_tracking usage_tracking_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.usage_tracking
+    ADD CONSTRAINT usage_tracking_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_activities user_activities_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_activities
+    ADD CONSTRAINT user_activities_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: user_calendar_events user_calendar_events_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_calendar_events
+    ADD CONSTRAINT user_calendar_events_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_connections user_connections_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_connections
+    ADD CONSTRAINT user_connections_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_emails user_emails_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionapp
+--
+
+ALTER TABLE ONLY public.user_emails
+    ADD CONSTRAINT user_emails_user_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: gestionapp
+--
+
+REVOKE USAGE ON SCHEMA public FROM PUBLIC;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict WK9PsyImWKG9abrZQWBiBU5YDHdV8oYXcosEBnacbNECt6Jcgj5xpLBiaV3mQ1n
+
+
+
+
+Je constate que Bouba via ChatInterface et EmailPage ne parvient plus à envoyer des mails alors qu'il possède tous les information necessaire
+
+[CHAT] Received message from user 2630a938-cff2-4034-afe3-4a5e448ae56d: "envoi un mail explicatif à diankaseydou52@gmail.co..."
+[CHAT] Saved user message for session: 28787075-b28b-4556-8cee-dd93f24babcc
+[CHAT] Forwarding to N8N: https://n8n.realtechprint.com/webhook-test/7f338448-11b5-458c-ada3-f009feccc184
+[CHAT] N8N response received: {"success":true,"output":"Je vois que vous souhaitez envoyer un email, mais les informations nécessaires ne sont pas complètes. Pour envoyer un email, j'ai besoin de :\n\n1. **L'adresse email du desti...
+[CHAT] Saved assistant message for session: 28787075-b28b-4556-8cee-dd93f24babcc
+[USAGE] Quota incremented for user 2630a938-cff2-4034-afe3-4a5e448ae56d, agent: email
+[USAGE] Quota incremented for user 2630a938-cff2-4034-afe3-4a5e448ae56d, agent: bouba_action
+
+Dans la page CalendarPage modifie la section Prochain RDV pour afficher le vrai prochain rendez-vous avec les information : nom, jour heure
