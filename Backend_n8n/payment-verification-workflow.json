@@ -1,0 +1,378 @@
+{
+  "name": "Payment Verification Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payment-completed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        200
+      ],
+      "id": "payment-webhook",
+      "name": "Payment Completed Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST", 
+        "path": "payment-failed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -720,
+        400
+      ],
+      "id": "payment-failed-webhook",
+      "name": "Payment Failed Webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "payment-type-check",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "payment_completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if", 
+      "typeVersion": 2,
+      "position": [
+        -440,
+        200
+      ],
+      "id": "payment-type-router",
+      "name": "Route Payment Type"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "table": {
+          "__rl": true,
+          "value": "profiles",
+          "mode": "list"
+        },
+        "filterType": "manual",
+        "matchingColumns": [
+          {
+            "column": "id",
+            "value": "={{ $json.body.user_id }}"
+          }
+        ],
+        "updateColumns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "account_verified": true,
+            "updated_at": "={{ $now }}"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        120
+      ],
+      "id": "activate-user-account",
+      "name": "Activate User Account",
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": {
+          "__rl": true, 
+          "value": "notifications",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $json.body.user_id }}",
+            "type": "payment_success",
+            "title": "Payment Successful",
+            "message": "Your payment has been processed and your account is now active!",
+            "data": {
+              "plan_id": "={{ $json.body.plan_id }}",
+              "amount": "={{ $json.body.amount }}",
+              "currency": "={{ $json.body.currency }}"
+            },
+            "read": false
+          }
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        240  
+      ],
+      "id": "send-success-notification",
+      "name": "Send Success Notification",
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds", 
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": {
+          "__rl": true,
+          "value": "user_activities", 
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $json.body.user_id }}",
+            "action": "account_activated",
+            "details": {
+              "plan_id": "={{ $json.body.plan_id }}",
+              "payment_amount": "={{ $json.body.amount }}",
+              "activation_method": "stripe_payment"
+            },
+            "timestamp": "={{ $now }}"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.supabase", 
+      "typeVersion": 1,
+      "position": [
+        -160,
+        360
+      ],
+      "id": "log-activation-activity",
+      "name": "Log Activation Activity", 
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase Account" 
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": {
+          "__rl": true,
+          "value": "notifications",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow", 
+          "value": {
+            "user_id": "={{ $json.body.user_id }}",
+            "type": "payment_failed",
+            "title": "Payment Failed",
+            "message": "We couldn't process your payment. Please try again or contact support.",
+            "data": {
+              "subscription_id": "={{ $json.body.subscription_id }}",
+              "amount": "={{ $json.body.amount }}",
+              "currency": "={{ $json.body.currency }}"
+            },
+            "read": false
+          }
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        480
+      ],
+      "id": "send-failed-notification", 
+      "name": "Send Failed Notification",
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-creds",
+          "name": "Supabase Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"success\": true,\n  \"message\": \"Payment verification completed\",\n  \"user_id\": $json.body.user_id,\n  \"timestamp\": $now\n} }}"
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        120,
+        200
+      ],
+      "id": "respond-success",
+      "name": "Respond Success"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"success\": true,\n  \"message\": \"Payment failure notification sent\", \n  \"user_id\": $json.body.user_id,\n  \"timestamp\": $now\n} }}"
+      },
+      "type": "n8n-nodes-base.respondToWebhook", 
+      "typeVersion": 1.1,
+      "position": [
+        120,
+        480
+      ],
+      "id": "respond-failed",
+      "name": "Respond Failed"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Payment Completed Webhook').item.json.body.api_endpoint || 'http://localhost:3001' }}/api/n8n/user-activated",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id", 
+              "value": "={{ $json.body.user_id }}"
+            },
+            {
+              "name": "plan_id",
+              "value": "={{ $json.body.plan_id }}"
+            },
+            {
+              "name": "activation_status",
+              "value": "completed"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        120
+      ],
+      "id": "notify-api-server",
+      "name": "Notify API Server"
+    }
+  ],
+  "connections": {
+    "Payment Completed Webhook": {
+      "main": [
+        [
+          {
+            "node": "Route Payment Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payment Failed Webhook": {
+      "main": [
+        [
+          {
+            "node": "Send Failed Notification", 
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Payment Type": {
+      "main": [
+        [
+          {
+            "node": "Activate User Account",
+            "type": "main", 
+            "index": 0
+          },
+          {
+            "node": "Send Success Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Activation Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activate User Account": {
+      "main": [
+        [
+          {
+            "node": "Notify API Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Success Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Failed Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond Failed", 
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-15T10:00:00.000Z",
+  "versionId": "1"
+}
