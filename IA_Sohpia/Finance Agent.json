@@ -1,0 +1,766 @@
+{
+  "name": "Finance Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        2112
+      ],
+      "id": "695b75e3-e29c-4b43-a5d0-4a10e33ec5ff",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "IpLYtUzjgqJ6XBwn",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4f360190-a717-4a93-8336-d03ea65975d5",
+              "name": "response",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1056,
+        1776
+      ],
+      "id": "8ca85fa9-1a54-4a08-8278-42866e80a853",
+      "name": "Response"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4f360190-a717-4a93-8336-d03ea65975d5",
+              "name": "response",
+              "value": "An error occurred. Please try again.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1056,
+        1968
+      ],
+      "id": "c5b0ebe7-0bc0-4f75-8a1b-ca5dad9c2223",
+      "name": "Try Again"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        64,
+        1888
+      ],
+      "id": "aa7d469c-6c55-49f0-a45a-05ff1187a093",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Retrieves financial records from the database",
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appbPZA132gTrGjty",
+          "mode": "list",
+          "cachedResultName": "Gestion Finances Personnelles",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblG3A1btJqIeofQC",
+          "mode": "list",
+          "cachedResultName": "Revenus",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty/tblG3A1btJqIeofQC"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtableTool",
+      "typeVersion": 2.1,
+      "position": [
+        384,
+        2144
+      ],
+      "id": "9f5c9791-b8ba-48d9-b0a6-f7861c03830f",
+      "name": "Revenus",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q0iVF6urTaJFX9yb",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Retrieves financial records from the database",
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appbPZA132gTrGjty",
+          "mode": "list",
+          "cachedResultName": "Gestion Finances Personnelles",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblinm2MCclT0BKPL",
+          "mode": "list",
+          "cachedResultName": "Dépenses",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty/tblinm2MCclT0BKPL"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtableTool",
+      "typeVersion": 2.1,
+      "position": [
+        512,
+        2144
+      ],
+      "id": "e9862fab-f08a-4730-a90d-c893b274ea4d",
+      "name": "Dépenses",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q0iVF6urTaJFX9yb",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Retrieves financial records from the database",
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appbPZA132gTrGjty",
+          "mode": "list",
+          "cachedResultName": "Gestion Finances Personnelles",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblQ5c8XAwokoL4kr",
+          "mode": "list",
+          "cachedResultName": "Rapports",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty/tblQ5c8XAwokoL4kr"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtableTool",
+      "typeVersion": 2.1,
+      "position": [
+        640,
+        2144
+      ],
+      "id": "637e1219-9551-43d6-a3a5-8399f4b9a98f",
+      "name": "Rapport",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q0iVF6urTaJFX9yb",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Retrieves financial records from the database",
+        "operation": "upsert",
+        "base": {
+          "__rl": true,
+          "value": "appbPZA132gTrGjty",
+          "mode": "list",
+          "cachedResultName": "Gestion Finances Personnelles",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblG3A1btJqIeofQC",
+          "mode": "list",
+          "cachedResultName": "Revenus",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty/tblG3A1btJqIeofQC"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Montant": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Montant', ``, 'number') }}",
+            "Source": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Source', ``, 'string') }}",
+            "Date de revenu": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Date_de_revenu', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Montant",
+              "displayName": "Montant",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Date de revenu",
+              "displayName": "Date de revenu",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Catégorie de revenu",
+              "displayName": "Catégorie de revenu",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Justificatif",
+              "displayName": "Justificatif",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Mois de revenu",
+              "displayName": "Mois de revenu",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Année de revenu",
+              "displayName": "Année de revenu",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Nom de la catégorie",
+              "displayName": "Nom de la catégorie",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Type de catégorie",
+              "displayName": "Type de catégorie",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Résumé automatique du justificatif",
+              "displayName": "Résumé automatique du justificatif",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Catégorisation automatique de la source",
+              "displayName": "Catégorisation automatique de la source",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rapports",
+              "displayName": "Rapports",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtableTool",
+      "typeVersion": 2.1,
+      "position": [
+        752,
+        2144
+      ],
+      "id": "09d67c98-d1fe-41b3-89a4-76460d1e4510",
+      "name": "Ajout Revenus",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q0iVF6urTaJFX9yb",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Retrieves financial records from the database",
+        "operation": "upsert",
+        "base": {
+          "__rl": true,
+          "value": "appbPZA132gTrGjty",
+          "mode": "list",
+          "cachedResultName": "Gestion Finances Personnelles",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblinm2MCclT0BKPL",
+          "mode": "list",
+          "cachedResultName": "Dépenses",
+          "cachedResultUrl": "https://airtable.com/appbPZA132gTrGjty/tblinm2MCclT0BKPL"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Name', ``, 'string') }}",
+            "Montant": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Montant', ``, 'number') }}",
+            "Date de dépense": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Date_de_d_pense', ``, 'string') }}",
+            "Description": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Description', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Montant",
+              "displayName": "Montant",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Date de dépense",
+              "displayName": "Date de dépense",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Catégorie",
+              "displayName": "Catégorie",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Photo du reçu",
+              "displayName": "Photo du reçu",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rapport associé",
+              "displayName": "Rapport associé",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Mois de dépense",
+              "displayName": "Mois de dépense",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Année de dépense",
+              "displayName": "Année de dépense",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Nom de la catégorie (lookup)",
+              "displayName": "Nom de la catégorie (lookup)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Type de catégorie (lookup)",
+              "displayName": "Type de catégorie (lookup)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Résumé intelligent de la dépense",
+              "displayName": "Résumé intelligent de la dépense",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Catégorisation intelligente (AI)",
+              "displayName": "Catégorisation intelligente (AI)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtableTool",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        2144
+      ],
+      "id": "b2493d84-6722-47d1-b71f-e68244095d5a",
+      "name": "Ajout Dépenses",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q0iVF6urTaJFX9yb",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://jbxinyegvwxiupgvursw.supabase.co/functions/v1/webhook-finance",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "naiom"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.response.toJsonString() }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1312,
+        1776
+      ],
+      "id": "5386251d-b6d8-4746-a75b-08945d17818e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "options": {
+          "systemMessage": "=Overview\n\nYou are a Finance Assistant connected to structured financial databases.\nYour role is to read, analyze, report, and update financial data using the available tools.\nYou act as an operational finance layer: consultation, reporting, and data entry.\nYou never invent numbers.\nYou never guess missing values.\nYou only use data retrieved from tools or explicitly provided by the user.\n\nAvailable Tools (MANDATORY USAGE)\n\nYou have access to the following tools and MUST select them based on user intent:\n📥 Revenus\nget record → retrieve existing revenue data\n📤 Dépenses\nget record → retrieve existing expense data\n📊 Rapport\nget record → retrieve existing financial reports or consolidated views\n➕ Ajout Revenus\nupsert record → add or update a revenue entry\n➖ Ajout Dépenses\nupsert record → add or update an expense entry\nIntent Detection Rules (CRITICAL)\n\nYou MUST first identify the user’s intent before acting.\n\n1️⃣ Consultation / Analyse\nIf the user asks to:\nsee revenues\nsee expenses\nunderstand financial performance\nanalyze profitability or costs\n→ Use Revenus (get record) and/or Dépenses (get record)\n→ Explain the data clearly.\n\n2️⃣ Rapport financier\nIf the user asks for:\na financial report\na summary\nan overview\nprofitability analysis\n→ You MUST:\nRetrieve Revenus\nRetrieve Dépenses\nOptionally retrieve Rapport\nCompare and structure the response as a report\n\n3️⃣ Ajout d’un revenu ou d’une dépense (VERY IMPORTANT)\nIf the user explicitly asks to add / record / log a revenue or an expense\n(examples:\n“ajoute une dépense”,\n“j’ai payé 120€ d’outil”,\n“ajoute un revenu de 3 000€”):\nYou MUST follow this sequence:\nDetermine if it is:\na revenue → use Ajout Revenus\nan expense → use Ajout Dépenses\nVerify required fields are present:\nAmount\nDescription or category\nDate\n\nUse today ONLY if explicitly stated or clearly implied\nIf any required information is missing:\nAsk a clarification question\nDO NOT create the record yet\nOnce data is sufficient:\nUse the appropriate upsert record tool\nConfirm clearly that the entry has been added\n\n⚠️ Never infer amounts, dates, or categories.\n\nFinancial Report Structure (WHEN REQUIRED)\n\nWhen producing a report, always follow this structure:\nRésumé global\nRevenus totaux\nDépenses totales\nRésultat net (profit / perte)\nAnalyse des revenus\nPrincipales sources\nRépartition\nTendances visibles (if data allows)\nAnalyse des dépenses\nPostes majeurs\nFixes vs variables\nDépenses remarquables\nIndicateurs clés\nMarge\nRatio dépenses / revenus\nPoints de vigilance\nRecommandations\nActions concrètes\nOptimisations possibles\nPriorités financières\nStyle & Output Rules\nLanguage: French only\nProfessional, clear, structured\nNo emojis\nNo fluff\nNo speculation\nDecisions and explanations must be data-driven\n\nFinal Instruction\nYou are a Finance Operations Agent.\nYour value is:\naccuracy\nstructure\nactionable financial clarity\n\nYou support decision-making, tracking, and clean financial operations, including adding revenues and expenses when requested."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        352,
+        1888
+      ],
+      "id": "433f724c-d467-40de-b61c-0e640096b118",
+      "name": "Finance Agent",
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "query": "quelles sont mes dépenses ce mois-ci"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revenus": {
+      "ai_tool": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dépenses": {
+      "ai_tool": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rapport": {
+      "ai_tool": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajout Revenus": {
+      "ai_tool": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajout Dépenses": {
+      "ai_tool": [
+        [
+          {
+            "node": "Finance Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finance Agent": {
+      "main": [
+        [
+          {
+            "node": "Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Try Again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f2bf4ab3-134f-4840-a891-e32143c818ba",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4bb8a0128764037e6be8d35659320cc5a4c40b23554514bbdd7147b718521d11"
+  },
+  "id": "KVL1jlMLhGHuAQ7N",
+  "tags": []
+}

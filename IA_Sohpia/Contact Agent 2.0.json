@@ -1,0 +1,421 @@
+{
+  "name": "Contact Agent 2.0",
+  "nodes": [
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        784,
+        2224
+      ],
+      "id": "8b318aac-c9f9-4ad4-9796-71cfb53a5e1f",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "IpLYtUzjgqJ6XBwn",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appUgfSiGIPdCo3a7",
+          "mode": "list",
+          "cachedResultName": "Base de Données Clients",
+          "cachedResultUrl": "https://airtable.com/appUgfSiGIPdCo3a7"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblIbQegC18u6FI7i",
+          "mode": "list",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/appUgfSiGIPdCo3a7/tblIbQegC18u6FI7i"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtableTool",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        2240
+      ],
+      "id": "9307d1b9-a335-4e48-8535-6659f6781c39",
+      "name": "Get Contacts",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q0iVF6urTaJFX9yb",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": {
+          "__rl": true,
+          "value": "appUgfSiGIPdCo3a7",
+          "mode": "list",
+          "cachedResultName": "Base de Données Clients",
+          "cachedResultUrl": "https://airtable.com/appUgfSiGIPdCo3a7"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblIbQegC18u6FI7i",
+          "mode": "list",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/appUgfSiGIPdCo3a7/tblIbQegC18u6FI7i"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $fromAI(\"name\") }}",
+            "phoneNumber": "={{ $fromAI(\"phoneNumber\") }}",
+            "emailAddress": "={{ $fromAI(\"emailAddress\") }}"
+          },
+          "matchingColumns": [
+            "name"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "emailAddress",
+              "displayName": "emailAddress",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Photo du Client",
+              "displayName": "Photo du Client",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Historique des Interactions",
+              "displayName": "Historique des Interactions",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Propriétés d'Intérêt",
+              "displayName": "Propriétés d'Intérêt",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Transactions",
+              "displayName": "Transactions",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Agent Responsable",
+              "displayName": "Agent Responsable",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "phoneNumber",
+              "displayName": "phoneNumber",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtableTool",
+      "typeVersion": 2.1,
+      "position": [
+        1104,
+        2224
+      ],
+      "id": "2f8ff061-3d3a-40e2-b037-7f3548b2646e",
+      "name": "Add or Update Contact",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q0iVF6urTaJFX9yb",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4f360190-a717-4a93-8336-d03ea65975d5",
+              "name": "response",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        1904
+      ],
+      "id": "dccb4546-df03-42cf-b13a-6aee7f64a1e7",
+      "name": "Response"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4f360190-a717-4a93-8336-d03ea65975d5",
+              "name": "response",
+              "value": "An error occurred. Please try again.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        2112
+      ],
+      "id": "252c17af-6f0e-4614-abf6-be35774b5524",
+      "name": "Try Again"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        592,
+        2000
+      ],
+      "id": "bf6cec38-3c9c-45e1-a539-2bf1eb72f234",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "options": {
+          "systemMessage": "=You are a Contact Management AI Agent.\n\nYour role is to intelligently manage contacts for the business.\nYou can retrieve existing contacts, create new ones, or update existing records.\n\nYou have access to the following tools:\n- \"Get Contacts\": search and retrieve existing contact records.\n- \"Add or Update Contact\": create a new contact or update an existing one (upsert).\n\n────────────────────────\nCORE OBJECTIVES\n────────────────────────\n1. Identify whether the contact already exists.\n2. Avoid creating duplicates.\n3. Always keep contact data clean, structured, and up to date.\n4. Take action autonomously using the available tools.\n\n────────────────────────\nWORKFLOW LOGIC (MANDATORY)\n────────────────────────\nStep 1 — Analyze the input  \n- Extract all relevant contact information:\n  - First name\n  - Last name\n  - Email\n  - Phone number\n  - Company\n  - Any additional useful metadata\n\nStep 2 — Search for existing contact  \n- Use \"Get Contacts\" to look for an existing contact.\n- Prioritize matching by:\n  1. Email (primary identifier)\n  2. Phone number\n  3. Full name + company (if needed)\n\nStep 3 — Decide the action  \n- If a matching contact exists:\n  - Update the contact using \"Add or Update Contact\"\n  - Only enrich or correct missing / outdated fields\n- If no contact exists:\n  - Create a new contact using \"Add or Update Contact\"\n\n────────────────────────\nRULES & CONSTRAINTS\n────────────────────────\n- Never create duplicate contacts.\n- Never guess or invent data.\n- If required information is missing or ambiguous, return a clear message explaining what is missing.\n- Always prefer updating an existing contact over creating a new one.\n- Keep values normalized (clean names, valid email format, no emojis).\n\n────────────────────────\nOUTPUT EXPECTATION\n────────────────────────\nAfter completing the action:\n- Return a short confirmation message explaining:\n  - Whether the contact was found or created\n  - What action was performed (created / updated)\n  - Key fields affected\n\nIf an error occurs:\n- Clearly explain why the action failed\n- Suggest what information is required to proceed"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        832,
+        2000
+      ],
+      "id": "a63d9d3a-d555-4292-85d8-8cc5d87fd5cb",
+      "name": "Contact Agent",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://jbxinyegvwxiupgvursw.supabase.co/functions/v1/webhook-contacts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "naiom"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"response\": $json.response } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1552,
+        1904
+      ],
+      "id": "7506d3d5-4201-4491-87ec-c894a33e797c",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "query": "obtenir l'email de Zeyneb"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Contact Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contacts": {
+      "ai_tool": [
+        [
+          {
+            "node": "Contact Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add or Update Contact": {
+      "ai_tool": [
+        [
+          {
+            "node": "Contact Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Contact Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact Agent": {
+      "main": [
+        [
+          {
+            "node": "Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Try Again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "48e419aa-2147-49e4-8c44-183fbe0da783",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4bb8a0128764037e6be8d35659320cc5a4c40b23554514bbdd7147b718521d11"
+  },
+  "id": "4FJzc3QycgblrNf5",
+  "tags": []
+}
