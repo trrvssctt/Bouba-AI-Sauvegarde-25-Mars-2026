@@ -1,0 +1,74 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@theme {
+  --font-display: "Syne", sans-serif;
+  --font-body: "DM Sans", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --color-primary: #6C3EF4;
+  --color-primary-light: #A78BFA;
+  --color-primary-dark: #4C1D95;
+  
+  --color-secondary: #1E1B4B;
+  --color-secondary-light: #312E81;
+  --color-secondary-dark: #0D0B2E;
+  
+  --color-surface: #FFFFFF;
+  --color-surface-dark: #1A1730;
+  
+  --color-background: #F5F3FF;
+  --color-background-dark: #0F0D1A;
+  
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-border: #E5E7EB;
+
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  
+  --shadow-violet: 0 8px 32px rgba(108, 62, 244, 0.18);
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.06);
+}
+
+@layer base {
+  body {
+    @apply font-body bg-background text-secondary antialiased;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-bold tracking-tight;
+  }
+}
+
+.glass-card {
+  @apply bg-surface/80 backdrop-blur-md border border-white/20 shadow-card rounded-2xl;
+}
+
+.btn-primary {
+  @apply bg-primary text-white rounded-full px-6 py-3 font-semibold transition-all duration-200 hover:bg-primary-dark hover:shadow-violet active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+}
+
+.btn-secondary {
+  @apply bg-secondary text-white rounded-full px-6 py-3 font-semibold transition-all duration-200 hover:bg-secondary-dark active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+}
+
+.btn-ghost {
+  @apply text-primary rounded-full px-6 py-3 font-semibold transition-all duration-200 hover:bg-primary/10 active:scale-95;
+}
+
+.input-bouba {
+  @apply w-full bg-surface border border-border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-200;
+}
+
+/* Markdown styling */
+.markdown-body {
+  @apply text-secondary leading-relaxed;
+}
+.markdown-body h1 { @apply text-2xl mb-4; }
+.markdown-body h2 { @apply text-xl mb-3 mt-6; }
+.markdown-body p { @apply mb-4; }
+.markdown-body ul { @apply list-disc pl-6 mb-4; }
+.markdown-body ol { @apply list-decimal pl-6 mb-4; }
+.markdown-body code { @apply font-mono bg-background px-1 rounded; }
