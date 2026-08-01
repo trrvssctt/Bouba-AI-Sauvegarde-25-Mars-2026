@@ -13,16 +13,24 @@ TEST_MESSAGE="Bonjour Bouba, peux-tu m'aider avec mes emails ?"
 echo ""
 echo "📝 Test 1: Envoi d'un message via /api/chat"
 echo "Message: '$TEST_MESSAGE'"
+echo "Format de réponse unique v3.0 : { success, output, agent, sessionId, mode }"
+echo "(success=false ⇒ l'agent a planté, le message d'erreur est dans output)"
 
-curl -X POST "$API_URL/api/chat" \
+RESPONSE=$(curl -s -X POST "$API_URL/api/chat" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer test-token" \
   -d "{
     \"message\": \"$TEST_MESSAGE\",
     \"userId\": \"$USER_ID\",
     \"history\": []
-  }" \
-  -w "\nStatus: %{http_code}\nTime: %{time_total}s\n" | jq '.'
+  }")
+
+echo "$RESPONSE" | jq '.'
+echo ""
+echo "→ success : $(echo "$RESPONSE" | jq -r '.success')"
+echo "→ agent   : $(echo "$RESPONSE" | jq -r '.agent')"
+echo "→ mode    : $(echo "$RESPONSE" | jq -r '.mode')"
+echo "→ output  : $(echo "$RESPONSE" | jq -r '.output' | head -c 200)"
 
 echo ""
 echo "📋 Test 2: Récupération des sessions utilisateur"

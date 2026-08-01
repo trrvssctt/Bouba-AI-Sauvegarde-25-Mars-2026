@@ -1,0 +1,192 @@
+# MISSION — Adapter Bouba'ia au workflow n8n SOPHIA v3.0
+
+> Fichier de mission pour Claude Code. À lire en entier avant de coder.
+> Contexte : le workflow n8n a été refondu (v3.0) : **un seul agent** avec tous les outils (Gmail, Calendar, Contacts, Finance, Tavily), plus de routeur JSON, plus d'inserts Postgres côté n8n. Le contrat webhook (URL, payload, format de réponse) est **inchangé**. Ta mission : adapter le backend et le frontend pour éliminer la lenteur, les erreurs de parsing, les faux succès, et garantir que **chaque page** utilise l'IA correctement de bout en bout.
+
+## Règles préalables (non négociables)
+
+1. Lis d'abord `CLAUDE.md`, `Etapes.MD`, `Attente_Bouba.MD` et `N8N_PAGES_INTEGRATION.md`.
+2. Vérifie dans `src/App.tsx` (~ligne 280+) quelles pages sont réellement routées AVANT de modifier quoi que ce soit. Ne touche jamais aux variantes non routées (`ChatPageSimple` vs `ChatPageReal`, `api/server-*.js`, etc.).
+3. Seul `api/server.ts` (port 3001) fait foi côté backend. Ne modifie pas `server.ts` racine (port 8000) sauf mention explicite.
+4. Ne change JAMAIS l'ordre du middleware Stripe webhook (`raw` body monté avant le JSON, `api/server.ts` ~ligne 360).
+5. Toute nouvelle valeur d'agent passe par `normalizeAgent()` (contrainte CHECK `VALID_AGENTS`, ~ligne 641).
+6. Migrations SQL manuelles uniquement (`api/migrations/`), jamais générées par un ORM.
+7. À chaque étape terminée : `npm run lint` (racine) + `cd api && npm run type-check`. Zéro erreur TypeScript.
+
+## Contrats à respecter (source de vérité)
+
+### Payload envoyé au webhook n8n (inchangé)
+
+```json
+{
+  "body": {
+    "message": "...",
+    "userId": "...",
+    "sessionId": "...",
+    "conversation_id": "...",
+    "history": [{ "role": "user|assistant", "content": "..." }],
+    "user_context": {
+      "name": "...", "company": "...",
+      "last_bouba_message": "...",
+      "memories": [{ "key": "...", "value": "..." }]
+    },
+    "context": "(optionnel — données de page, balises [EMAIL_TO] etc.)",
+    "agent": "email|calendar|contacts|finance|general",
+    "source": "direct|page_action|admin",
+    "role": "user|admin|superadmin",
+    "timestamp": "...",
+    "tokens_used": 0
+  }
+}
+```
+
+### Réponse n8n v3.0 (TOUJOURS cette forme, succès comme erreur)
+
+```json
+{
+  "success": true,
+  "output": "réponse en Markdown",
+  "message": "identique à output",
+  "agent": "email|calendar|contacts|finance|general",
+  "sessionId": "...",
+  "tokens_used": 0,
+  "type": "chat"
+}
+```
+
+Il n'y a plus de variantes par agent (`type: "email"`, `type: "calendar"` n'existent plus). `success: false` signifie que l'agent a planté : le message d'erreur utilisateur est dans `output`.
+
+---
+
+## PARTIE 1 — Backend (`api/server.ts`)
+
+### 1.1 CRITIQUE — Vérifier la persistance du message assistant
+
+n8n n'écrit **plus rien** dans Postgres. Vérifie que `/api/chat` (~ligne 738+) sauvegarde bien : (a) le message utilisateur AVANT l'appel n8n, (b) le message assistant APRÈS la réponse n8n, avec `agent_used = normalizeAgent(reponse.agent)`. Si la sauvegarde assistant manque ou est conditionnelle, corrige-la. Idem pour `/api/bouba/action` (~ligne 1423) : décider explicitement (et documenter en commentaire) si les actions de page sont persistées ou non — aujourd'hui elles ne créent pas de session, c'est OK, mais le code ne doit pas planter pour autant.
+
+### 1.2 CRITIQUE — Nettoyer les doublons existants
+
+L'ancien workflow insérait les messages en double (n8n + backend). Écris une migration manuelle `api/migrations/XXX_dedupe_messages.sql` qui supprime les doublons de `public.messages` (même `conversation_id`, même `role`, même `content`, `created_at` à moins de 10 secondes d'écart → garder le plus ancien). Fournis aussi la requête SELECT de vérification avant/après. Ne l'exécute pas toi-même : documente-la dans `Etapes.MD`.
+
+### 1.3 Parser de réponse n8n unique et robuste
+
+Crée UNE fonction `parseN8nResponse(raw: unknown): { success: boolean; output: string; agent: string; suggestion?: string }` dans `api/lib/` et utilise-la dans `/api/chat` ET `/api/bouba/action`. Règles :
+
+- `output = raw.output ?? raw.message ?? raw.text ?? raw.response ?? ''` ; si vide → success false + message d'erreur français générique.
+- Tolérer une réponse n8n sous forme de tableau (`[{...}]` → prendre le premier élément) et sous forme de string JSON (tenter `JSON.parse`, sinon traiter la string comme output direct).
+- `agent = normalizeAgent(raw.agent ?? 'general')`.
+- Ne JAMAIS lever d'exception : toute forme inattendue → `{ success: false, output: "message d'erreur propre" }` + `console.error` avec le raw tronqué à 500 caractères.
+
+Supprime tout code de parsing dupliqué/mort lié aux anciens formats par agent.
+
+### 1.4 Timeout et mesure de latence côté backend
+
+- Ajoute un `AbortController` de **50 secondes** sur le fetch vers n8n (le frontend coupe à 60 s ; le backend doit échouer proprement avant, avec un message français : « Bouba met trop de temps à répondre. Réessayez. »).
+- Log systématique : `console.log('[n8n]', agent, durationMs)` sur chaque appel. Si `durationMs > 15000`, log en `warn`. C'est notre outil de diagnostic de la lenteur.
+
+### 1.5 Répondre au client AVANT les écritures non critiques
+
+Après réception de la réponse n8n : renvoie la réponse HTTP au client d'abord, puis exécute la sauvegarde du message assistant, l'incrément de quota et `usage_tracking` en asynchrone (fire-and-forget avec `.catch(err => console.error(...))`). Exception : si la sauvegarde du message assistant échoue silencieusement trop souvent, c'est inacceptable — ajoute un compteur d'erreurs loggé. Le message UTILISATEUR reste sauvegardé avant l'appel n8n (synchrone) : c'est lui qui garantit qu'on ne perd pas la demande.
+
+### 1.6 Réduire le payload envoyé à n8n (lenteur = tokens)
+
+- `history` : plafonner à **6 messages** (au lieu de 10) et tronquer chaque `content` à **600 caractères** (ajouter « … » si tronqué). n8n a déjà une mémoire de 6 messages par session ; l'historique n'est qu'un filet de sécurité.
+- `user_context.memories` : max 15 entrées, valeur tronquée à 300 caractères chacune.
+- Passages de la base de connaissance (`searchKnowledge`) : max 3 passages, 800 caractères chacun.
+- `context` (actions de page) : tronquer à **4000 caractères** côté backend (garde le début), avec log warn si tronqué.
+
+### 1.7 Réponses simulées et messages d'erreur
+
+- `generateSimulatedResponse()` (repli si n8n 404) : vérifie qu'elle renvoie EXACTEMENT le même format que `parseN8nResponse` et qu'elle préfixe clairement « (Mode démo — n8n indisponible) » pour qu'on ne confonde plus jamais une simulation avec une vraie action.
+- Cherche dans tout le repo la chaîne `$('Parse Input')` et tout template n8n non évalué qui aurait fui dans un message codé en dur (le bug du message d'accueil). Supprime/corrige toute occurrence côté app.
+
+### 1.8 Vérification `normalizeAgent()`
+
+Valeurs que n8n v3.0 peut renvoyer : `email`, `calendar`, `contacts`, `finance`, `general`. Vérifie qu'elles sont toutes mappées et présentes dans `VALID_AGENTS`. `general` doit être accepté.
+
+---
+
+## PARTIE 2 — Frontend, hooks partagés
+
+### 2.1 `src/hooks/useBouba.ts`
+
+- Créer/mutualiser un parseur miroir de celui du backend : la réponse de `/api/chat` arrive déjà normalisée, donc le hook ne doit plus fouiller `output`/`message`/`text`/`response` en cascade — il lit `output` et `success`, point. Supprimer le code de parsing legacy.
+- Si `success === false` : afficher `output` comme message d'erreur (bulle distincte, style erreur), ne JAMAIS l'afficher comme une réponse normale de Bouba.
+- Bloc `---SUGGESTIONS---` : rendre le parsing tolérant (regex insensible aux espaces/retours ligne, try/catch sur le JSON, suggestions ignorées silencieusement si invalides — jamais de crash).
+- Balises `[ACTION:...]` : parsing tolérant idem. Si une action échoue (ex. `CREATE_CONTACT` invalide), log console + toast discret, mais afficher quand même le texte de la réponse.
+- Timeout 60 s conservé ; message de timeout distinct du message d'erreur serveur.
+
+### 2.2 `src/hooks/useBoubaAction.ts`
+
+- Même parseur partagé que `useBouba` (facteur commun dans `src/lib/`, pas de copier-coller).
+- Tronquer `context` à 4000 caractères AVANT envoi (défense en profondeur, en plus du backend).
+- États exposés obligatoires : `isLoading`, `error`, `lastAgent` — chaque page doit pouvoir afficher un spinner et une erreur propre.
+
+---
+
+## PARTIE 3 — Page par page (chaque canal doit être rempli et testé)
+
+Pour CHAQUE page ci-dessous : vérifier que la page routée dans `App.tsx` est bien celle que tu modifies, câbler les fonctions listées, afficher loading/erreur, et valider la « Definition of Done ».
+
+### 3.1 Chat — `ChatInterface.tsx` (+ BoubaWidget global)
+
+- Envoi → `/api/chat` → affichage `output` en Markdown. Badge agent depuis `agent` de la réponse.
+- Historique local : envoyer les 6 derniers messages (aligné avec 1.6).
+- Suggestions cliquables si présentes ; sinon rien (pas de bloc vide).
+- **DoD** : « salut » répond en < 8 s sans texte de template brut ; « écris un mail à X : ... » aboutit à un email RÉELLEMENT envoyé (vérifiable dans Gmail « Envoyés ») et la confirmation ne s'affiche que si `success === true`.
+
+### 3.2 Email — `EmailPage.tsx` + `useEmailAI.ts`
+
+- `generateSummary` / `generateSmartReplies` → `/api/ai/generate` (Gemini) : inchangé, mais vérifier le comportement sans `GEMINI_API_KEY` (réponses par défaut affichées avec mention « suggestion générique »).
+- `draftEmailFromPrompt(prompt)` → `callBouba` : le message doit demander UN BROUILLON (l'agent v3.0 a l'outil Create Draft). Vérifier que la réponse est affichée dans le composer, pas envoyée.
+- `sendEmailViaBouba(...)` → `callBouba` avec dans `context` les balises EXACTES :
+  ```
+  [EMAIL_TO]dest@ex.com[/EMAIL_TO]
+  [EMAIL_SUBJECT]Objet[/EMAIL_SUBJECT]
+  [EMAIL_BODY_HTML]<p>...</p>[/EMAIL_BODY_HTML]
+  ```
+  Le workflow v3.0 utilise ces valeurs telles quelles. Vérifier que le frontend les compose bien dans `context` (ou en préfixe du message) — c'est le point de câblage le plus important de cette page.
+- Confirmation d'envoi UNIQUEMENT si `success === true`.
+- **DoD** : envoi depuis le composer via Bouba → email visible dans Gmail Envoyés ; échec Gmail → message d'erreur rouge, pas de faux succès.
+
+### 3.3 Calendrier — `CalendarPage.tsx` + `useCalendarAI.ts`
+
+- `processNaturalLanguageCommand` : ne passer en `context` QUE les événements de la fenêtre pertinente (aujourd'hui −7 j → +30 j, max 30 événements, champs id/titre/début/fin uniquement). Pas tout le calendrier.
+- Après une action réussie (`success === true`), rafraîchir la vue (`syncGoogleCalendar()` ou reload local) pour que l'événement créé apparaisse immédiatement.
+- `generateDailyBriefing` : passer la date du jour et les événements du jour en contexte.
+- **DoD** : « réunion demain 15h avec Marc » crée l'événement (visible dans Google Calendar ET dans la vue après refresh) ; « standup chaque lundi 9h » crée un événement récurrent hebdomadaire.
+
+### 3.4 Contacts — `ContactsPage.tsx` + `useContactAI.ts`
+
+- `processContactCommand` : le mix Gemini (intention) + n8n (exécution) reste, mais si Gemini échoue/absent, fallback direct vers `callBouba` avec la commande brute (l'agent v3.0 sait router seul vers contactAgent).
+- Après ajout/suppression réussis : recharger le store contacts (`RELOAD_CONTACTS` ou refetch direct).
+- **DoD** : « ajoute Alice Martin, alice@techcorp.com » crée le contact et il apparaît dans la liste sans refresh manuel de la page.
+
+### 3.5 Finance — `FinancePage.tsx` + `useFinanceAI.ts`
+
+- Parsing `[TRANSACTION]{...}[/TRANSACTION]` : regex tolérante (`/\[TRANSACTION\]([\s\S]*?)\[\/TRANSACTION\]/`), `JSON.parse` en try/catch, validation des champs (`type` ∈ {expense, income}, `amount` number > 0, `date` parseable) avant insertion dans le store. Transaction invalide → toast d'erreur explicite, pas d'insertion silencieuse.
+- `generateMonthlyReport` : contexte = transactions du mois courant uniquement, max 50, champs essentiels.
+- `analyzeFinances` : passer un résumé agrégé (totaux par catégorie) plutôt que la liste brute quand il y a > 50 transactions.
+- **DoD** : « j'ai reçu 500€ pour une presta le 10 juillet » crée la transaction visible dans le tableau ; « rapport du mois » renvoie un rapport narratif en < 20 s.
+
+### 3.6 Admin — `AdminLayout.tsx` (BoubaWidget `source="admin"`)
+
+- Le workflow v3.0 n'a PAS d'outils admin connectés : Bouba le dira. Côté app, rien à casser — vérifier simplement que le widget admin fonctionne (pas de quota consommé, réponse affichée) et noter dans `Etapes.MD` que les outils admin n8n sont un chantier futur.
+
+---
+
+## PARTIE 4 — Vérifications finales
+
+1. Mettre à jour les scripts `test_*.sh` à la racine pour refléter le format de réponse unique (`success/output/agent`).
+2. Grep repo entier : plus aucune référence aux anciens types de réponse (`type: "email"`, `type: "calendar"`, `Respond to Webhook Mail`, etc.) dans le code actif.
+3. Mettre à jour `N8N_PAGES_INTEGRATION.md` (section 5) avec le schéma v3.0 : `Webhook → Parse Input → Bouba Agent (tools) → Respond Success/Error`.
+4. Mettre à jour `Etapes.MD` : ce qui a été fait, la migration dedupe à exécuter, les chantiers restants (outils admin, multi-tenant Google).
+5. Checklist manuelle complète (à dérouler et cocher dans `Etapes.MD`) : salutation, question générale, recherche web, calcul, envoi email chat, envoi email page, brouillon, résumé emails, création RDV, RDV récurrent, modification RDV, dispo (« quand suis-je libre ? »), ajout contact, recherche contact, ajout dépense, ajout revenu, rapport mensuel, question finance, comportement quota dépassé (429), comportement n8n éteint (mode démo), timeout.
+
+## Critères de succès globaux
+
+- Aucune réponse utilisateur ne contient de template brut (`{{ ... }}`) ni de JSON brut.
+- Aucun faux succès : toute confirmation d'action correspond à une action réellement exécutée.
+- Réponse simple < 8 s ; action avec outil < 20 s (latences loggées côté backend).
+- Zéro doublon de messages en base après migration.
+- `npm run lint` et `npm run type-check` passent.

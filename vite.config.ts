@@ -30,6 +30,7 @@ export default defineConfig(({mode}) => {
           target: 'http://localhost:3001',
           changeOrigin: true,
           secure: false,
+          cookieDomainRewrite: 'localhost',
         },
         '/n8n-webhook': {
           target: 'https://n8n.realtechprint.com',

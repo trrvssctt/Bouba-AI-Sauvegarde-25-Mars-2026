@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "activeInstanceId": "instance-a021d7e4",
+  "instances": [
+    {
+      "id": "instance-a021d7e4",
+      "name": "n8n.realtechprint.com · Seydou Dianka",
+      "host": "https://n8n.realtechprint.com",
+      "syncFolder": "workflows",
+      "projectId": "personal",
+      "projectName": "Personal",
+      "instanceIdentifier": "n8n_realtechprint_seydou_d",
+      "workflowDir": "workflows/n8n_realtechprint_seydou_d/personal",
+      "verification": {
+        "status": "verified",
+        "normalizedHost": "https://n8n.realtechprint.com",
+        "userId": "defab3b1-70d9-44a0-9f64-c638b9adc8aa",
+        "userName": "Seydou Dianka",
+        "userEmail": "diankaseydou52@gmail.com",
+        "lastCheckedAt": "2026-04-29T15:24:52.863Z"
+      }
+    }
+  ],
+  "host": "https://n8n.realtechprint.com",
+  "syncFolder": "workflows",
+  "projectId": "personal",
+  "projectName": "Personal",
+  "instanceIdentifier": "n8n_realtechprint_seydou_d",
+  "workflowDir": "workflows/n8n_realtechprint_seydou_d/personal"
+}

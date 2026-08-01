@@ -78,7 +78,8 @@ async function startServer() {
 
   // n8n Proxy Chat API
   app.post("/api/chat", async (req, res) => {
-    const { chatInput, history, sessionId } = req.body;
+    const { message, chatInput, history, sessionId } = req.body;
+    const finalMessage = message || chatInput;
     const webhookUrl = process.env.VITE_N8N_WEBHOOK_URL || 'https://n8n.realtechprint.com/workflow/vunsANcNZDPe5ytB/2dbd90?projectId=wUg55olFqefRijk3';
 
     try {
@@ -88,10 +89,13 @@ async function startServer() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          chatInput,
-          history,
-          sessionId,
-          timestamp: new Date().toISOString()
+          body: {
+            message: finalMessage,
+            chatInput: finalMessage, // Keep for fallback
+            history,
+            sessionId,
+            timestamp: new Date().toISOString()
+          }
         })
       });
 
