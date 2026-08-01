@@ -3,6 +3,11 @@ import cors from 'cors';
 import { json, raw } from 'body-parser';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
+import path from 'path';
+import multer from 'multer';
+import * as XLSX from 'xlsx';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pdfParse: (buf: Buffer) => Promise<{ text: string }> = require('pdf-parse');
 import {
   createCheckoutSession,
   createUpgradeCheckoutSession,
@@ -14,16 +19,262 @@ import {
 } from './stripe';
 import { handleStripeWebhook } from './stripe-webhook';
 import { pool, query, queryOne, testConnection } from './lib/db';
+import {
+  normalizeAgent,
+  parseN8nResponse,
+  callN8nWebhook,
+  capHistory,
+  capMemories,
+  capPageContext,
+  type ParsedN8nResponse,
+} from './lib/n8n';
+import { getProfileWithFreshQuota, isQuotaExhausted, effectiveLimit } from './lib/quota';
+import { sendPaymentPendingEmail } from './lib/email';
+import { processAutoRenewalInvoices } from './lib/renewals';
 import authRoutes, { authenticate } from './auth';
 import dataRoutes from './data';
 import paymentRoutes from './payments';
 import adminRoutes, { supportRouter, notificationsRouter } from './admin';
 
-// Load environment variables
-dotenv.config({ path: '../.env' });
+// Load environment variables (résolution absolue depuis la racine du projet)
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // Test database connection on startup
 testConnection();
+
+// ── Multer : stockage en mémoire (fichiers ≤ 15 Mo) ──────────────────────────
+const knowledgeUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['text/csv', 'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/pdf', 'text/plain', 'application/octet-stream'];
+    const ext = (file.originalname.split('.').pop() || '').toLowerCase();
+    if (allowed.includes(file.mimetype) || ['csv','xlsx','xls','pdf','txt'].includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Format non supporté. Acceptés : CSV, Excel, PDF, TXT'));
+    }
+  }
+});
+
+// ── Parsers de fichiers ───────────────────────────────────────────────────────
+
+function parseCSV(buffer: Buffer): string {
+  const text = buffer.toString('utf-8');
+  const lines = text.split('\n').filter(l => l.trim());
+  return lines.join('\n');
+}
+
+function parseExcel(buffer: Buffer): string {
+  try {
+    const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+    const parts: string[] = [];
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      const trimmed = csv.trim();
+      if (trimmed) parts.push(`[Feuille: ${sheetName}]\n${trimmed}`);
+    }
+    return parts.join('\n\n');
+  } catch (err: any) {
+    console.warn('[KNOWLEDGE] xlsx parse warning:', err?.message || err);
+    return '';
+  }
+}
+
+async function parsePDF(buffer: Buffer): Promise<string> {
+  try {
+    const data = await (pdfParse as any)(buffer, { max: 0 });
+    return (data.text || '').trim();
+  } catch (err: any) {
+    console.warn('[KNOWLEDGE] pdf-parse warning:', err?.message || err);
+    return '';
+  }
+}
+
+async function extractFileContent(buffer: Buffer, originalName: string): Promise<string> {
+  const ext = (originalName.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return parsePDF(buffer);
+  if (ext === 'xlsx' || ext === 'xls') return parseExcel(buffer);
+  if (ext === 'csv') return parseCSV(buffer);
+  return buffer.toString('utf-8'); // txt et autres texte brut
+}
+
+// ── Recherche dans la base de connaissance ────────────────────────────────────
+
+/**
+ * Recherche les passages les plus pertinents dans les documents de l'utilisateur.
+ * Utilise PostgreSQL full-text search (français) + fallback ILIKE.
+ * Retourne du texte formaté prêt à être injecté dans le contexte IA.
+ */
+// Mots vides français à exclure des recherches
+const FR_STOP_WORDS = new Set([
+  'le','la','les','un','une','des','du','de','d','à','au','aux','et','ou',
+  'mais','donc','or','ni','car','ce','cet','cette','ces','qui','que','qu',
+  'dont','où','mon','ma','mes','ton','ta','tes','son','sa','ses','notre',
+  'nos','votre','vos','leur','leurs','je','tu','il','elle','nous','vous',
+  'ils','elles','me','te','se','lui','y','en','si','ne','pas','plus','par',
+  'sur','sous','dans','avec','pour','entre','vers','chez','selon','comme',
+  'tout','tous','très','bien','ainsi','alors','aussi','avant','après',
+  'explique','expliquer','dis','donne','montre','décris','analyser','analyse',
+  'veux','voudrais','peux','peut','avoir','être','faire','dire','voir',
+  'document','documents','fichier','fichiers','texte',
+]);
+
+function extractKeywords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\s,;:.!?'"()\[\]]+/)
+    .filter(w => w.length > 2 && !FR_STOP_WORDS.has(w));
+}
+
+async function searchKnowledge(userId: string, queryText: string, maxChars = 3000): Promise<string | null> {
+  if (!queryText.trim()) return null;
+  try {
+    const keywords = extractKeywords(queryText);
+
+    // 1. Full-text search PostgreSQL (français) sur les mots-clés filtrés
+    let rows: { name: string; content: string }[] = [];
+    if (keywords.length) {
+      const ftsQuery = keywords.join(' | '); // OR entre mots-clés
+      rows = await query<{ name: string; content: string }>(
+        `SELECT name, content
+         FROM public.knowledge_documents
+         WHERE user_id = $1
+           AND status = 'indexed'
+           AND content IS NOT NULL
+           AND to_tsvector('french', content) @@ to_tsquery('french', $2)
+         ORDER BY created_at DESC
+         LIMIT 5`,
+        [userId, ftsQuery]
+      );
+    }
+
+    // 2. Fallback ILIKE : cherche chaque mot-clé séparément (OR)
+    if (!rows.length && keywords.length) {
+      const conditions = keywords.slice(0, 5).map((_, i) => `content ILIKE $${i + 2}`).join(' OR ');
+      const params: any[] = [userId, ...keywords.slice(0, 5).map(k => `%${k}%`)];
+      rows = await query<{ name: string; content: string }>(
+        `SELECT name, content
+         FROM public.knowledge_documents
+         WHERE user_id = $1
+           AND status = 'indexed'
+           AND content IS NOT NULL
+           AND (${conditions})
+         ORDER BY created_at DESC
+         LIMIT 5`,
+        params
+      );
+    }
+
+    // 3. Dernier recours : retourner tous les documents de l'utilisateur
+    if (!rows.length) {
+      rows = await query<{ name: string; content: string }>(
+        `SELECT name, content
+         FROM public.knowledge_documents
+         WHERE user_id = $1
+           AND status = 'indexed'
+           AND content IS NOT NULL
+         ORDER BY created_at DESC
+         LIMIT 3`,
+        [userId]
+      );
+    }
+
+    if (!rows.length) return null;
+
+    // Extraire les passages les plus pertinents de chaque document
+    const snippets: string[] = [];
+    let totalChars = 0;
+
+    // Plafond : max 3 passages, 800 caractères chacun (lenteur = tokens)
+    const MAX_SNIPPETS = 3;
+    const MAX_SNIPPET_CHARS = 800;
+    for (const row of rows) {
+      if (totalChars >= maxChars || snippets.length >= MAX_SNIPPETS) break;
+      const chunks = splitIntoChunks(row.content, 600);
+      const scored = chunks.map(c => ({
+        text: c,
+        score: scoreChunk(c, queryText),
+      })).sort((a, b) => b.score - a.score);
+
+      for (const { text } of scored.slice(0, 3)) {
+        if (totalChars >= maxChars || snippets.length >= MAX_SNIPPETS) break;
+        const remaining = Math.min(maxChars - totalChars, MAX_SNIPPET_CHARS);
+        const excerpt = text.length > remaining ? text.slice(0, remaining) : text;
+        snippets.push(`📄 ${row.name}:\n${excerpt}`);
+        totalChars += excerpt.length;
+      }
+    }
+
+    return snippets.length ? snippets.join('\n\n---\n\n') : null;
+  } catch (err) {
+    console.warn('[KNOWLEDGE] search error:', err);
+    return null;
+  }
+}
+
+function splitIntoChunks(text: string, size: number): string[] {
+  // Découpe d'abord sur double-saut, puis sur saut simple si les blocs restent trop grands
+  const paragraphs = text.split(/\n{2,}/);
+  const lines: string[] = [];
+  for (const p of paragraphs) {
+    if (p.length > size) {
+      // Paragraphe trop grand : découpe ligne par ligne
+      lines.push(...p.split('\n').filter(l => l.trim()));
+    } else {
+      lines.push(p);
+    }
+  }
+
+  const chunks: string[] = [];
+  let current = '';
+  for (const line of lines) {
+    if (current.length + line.length > size && current) {
+      chunks.push(current.trim());
+      current = line;
+    } else {
+      current += (current ? '\n' : '') + line;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+
+  // Dernier filet : si un chunk dépasse encore size, on le tronque
+  return chunks.map(c => c.length > size * 2 ? c.slice(0, size * 2) : c);
+}
+
+function scoreChunk(chunk: string, query: string): number {
+  const words = extractKeywords(query);
+  const lower = chunk.toLowerCase();
+  return words.reduce((score, w) => score + (lower.includes(w) ? 1 : 0), 0);
+}
+
+// ── Migration automatique de la table knowledge_documents ────────────────────
+
+async function ensureKnowledgeTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS public.knowledge_documents (
+        id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id     UUID          NOT NULL,
+        name        VARCHAR(255)  NOT NULL,
+        file_type   VARCHAR(20)   NOT NULL DEFAULT 'txt',
+        size_bytes  INTEGER       NOT NULL DEFAULT 0,
+        status      VARCHAR(20)   NOT NULL DEFAULT 'processing',
+        chunk_count INTEGER       NOT NULL DEFAULT 0,
+        content     TEXT,
+        created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+      )
+    `, []);
+    // Ajouter colonnes si elles manquent (idempotent)
+    await query(`ALTER TABLE public.knowledge_documents ADD COLUMN IF NOT EXISTS content TEXT`, []).catch(() => {});
+    await query(`ALTER TABLE public.knowledge_documents ADD COLUMN IF NOT EXISTS file_type VARCHAR(20) NOT NULL DEFAULT 'txt'`, []).catch(() => {});
+  } catch { /* table existe déjà */ }
+}
+ensureKnowledgeTable();
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -144,20 +395,58 @@ app.use('/api/support', supportRouter);
 // User-facing notifications
 app.use('/api/notifications', notificationsRouter);
 
+// ── Photo de profil ───────────────────────────────────────────────────────────
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) cb(null, true)
+    else cb(new Error('Format non supporté (JPEG, PNG ou WebP)'))
+  },
+})
+
+// POST /api/user/avatar — cette route manquait : l'upload de photo échouait
+app.post('/api/user/avatar', authenticate, avatarUpload.single('file'), async (req: any, res) => {
+  try {
+    const file = req.file as Express.Multer.File | undefined
+    if (!file) return res.status(400).json({ success: false, error: 'Fichier requis (champ « file »)' })
+    const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`
+    await query(`UPDATE public.profiles SET avatar_url = $1, updated_at = NOW() WHERE id = $2`, [dataUrl, req.user.id])
+    res.json({ success: true, avatarUrl: dataUrl })
+  } catch (err) {
+    console.error('[POST /api/user/avatar]', err)
+    res.status(500).json({ success: false, error: 'Erreur lors de l\'enregistrement de la photo' })
+  }
+}, (err: any, _req: any, res: any, _next: any) => {
+  res.status(400).json({ success: false, error: err.message || 'Fichier invalide (max 2 Mo)' })
+})
+
 // ── Upgrade requests (user-facing) ────────────────────────────────────────────
 
-// POST /api/upgrade-requests — authenticated user submits a Wave upgrade request
-app.post('/api/upgrade-requests', authenticate, async (req: any, res) => {
+// Preuve de paiement Wave (capture/reçu, max 5 Mo)
+const upgradeProofUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(file.mimetype)) cb(null, true)
+    else cb(new Error('Format de preuve non supporté (JPEG, PNG, WebP ou PDF)'))
+  },
+})
+
+// POST /api/upgrade-requests — l'utilisateur scanne le QR Wave, paie, saisit
+// la référence et uploade sa preuve. IMPORTANT : le plan actuel reste actif
+// (aucune modification du profil) tant que l'admin n'a pas validé.
+app.post('/api/upgrade-requests', authenticate, upgradeProofUpload.single('proofFile'), async (req: any, res) => {
   try {
     const userId = req.user?.id
     if (!userId) return res.status(401).json({ success: false, error: 'Non authentifié' })
 
-    const { toPlan, paymentMethod, paymentReference, stripeSessionId, amount } = req.body
+    const { toPlan, paymentMethod, paymentReference, stripeSessionId, amount, months, nextPaymentDate } = req.body
     if (!toPlan) return res.status(400).json({ success: false, error: 'toPlan requis' })
 
     // Récupérer le plan actuel
-    const profile = await queryOne<{ plan_id: string }>(
-      'SELECT plan_id FROM public.profiles WHERE id = $1', [userId]
+    const profile = await queryOne<{ plan_id: string; first_name: string }>(
+      'SELECT plan_id, first_name FROM public.profiles WHERE id = $1', [userId]
     )
     const fromPlan = profile?.plan_id || 'starter'
 
@@ -170,13 +459,44 @@ app.post('/api/upgrade-requests', authenticate, async (req: any, res) => {
       return res.status(409).json({ success: false, error: 'Une demande pour ce plan est déjà en attente' })
     }
 
+    // Preuve de paiement uploadée (capture Wave, reçu…)
+    const proofFile = req.file as Express.Multer.File | undefined
+    const proof = proofFile
+      ? JSON.stringify({
+          name: proofFile.originalname,
+          mime: proofFile.mimetype,
+          size: proofFile.size,
+          data: proofFile.buffer.toString('base64'),
+        })
+      : null
+
     await query(`
       INSERT INTO public.upgrade_requests
-        (user_id, from_plan, to_plan, payment_method, payment_reference, stripe_session_id, amount, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
-    `, [userId, fromPlan, toPlan, paymentMethod || 'wave', paymentReference || null, stripeSessionId || null, amount || 0])
+        (user_id, from_plan, to_plan, payment_method, payment_reference, stripe_session_id, amount, status, months_paid, next_payment_date, proof)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10::jsonb)
+    `, [userId, fromPlan, toPlan, paymentMethod || 'wave', paymentReference || null, stripeSessionId || null, Number(amount) || 0,
+        Number(months) || 1, nextPaymentDate || null, proof])
 
-    res.json({ success: true })
+    // Email « paiement reçu, plan bientôt actif » + notification in-app.
+    // Le plan actuel N'EST PAS touché — aucune interruption de service.
+    const planRow = await queryOne<{ currency: string }>(`SELECT currency FROM public.plans WHERE id = $1`, [toPlan]).catch(() => null)
+    sendPaymentPendingEmail(req.user.email, profile?.first_name, {
+      planId: toPlan,
+      amount: (Number(amount) || 0) > 200 ? Math.round(Number(amount)) / 100 : Number(amount) || 0,
+      currency: planRow?.currency || 'EUR',
+      months: Number(months) || 1,
+      reference: paymentReference || null,
+    }).catch(err => console.warn('[upgrade-requests email]', err))
+
+    query(`
+      INSERT INTO public.notifications (user_id, type, subject, body, sender_id)
+      VALUES ($1, 'app', 'Paiement reçu — validation en cours ✅', $2, NULL)
+    `, [userId, `Votre paiement Wave pour le plan ${toPlan} est en cours de validation. Votre plan sera activé sous 24 h ouvrées. En attendant, votre plan actuel reste pleinement actif.`]).catch(() => {})
+
+    res.json({
+      success: true,
+      message: 'Demande enregistrée. Vous recevrez un email de confirmation — votre plan actuel reste actif en attendant la validation.',
+    })
   } catch (err) {
     console.error('[upgrade-requests POST]', err)
     res.status(500).json({ success: false, error: 'Erreur serveur' })
@@ -200,6 +520,123 @@ app.get('/api/upgrade-requests/status', authenticate, async (req: any, res) => {
     res.json({ success: true, data: row || null })
   } catch (err) {
     console.error('[upgrade-requests/status GET]', err)
+    res.status(500).json({ success: false, error: 'Erreur serveur' })
+  }
+})
+
+// GET /api/upgrade-requests/history — full payment history for the authenticated user
+app.get('/api/upgrade-requests/history', authenticate, async (req: any, res) => {
+  try {
+    const userId = req.user?.id
+    if (!userId) return res.status(401).json({ success: false, error: 'Non authentifié' })
+
+    const rows = await query(`
+      SELECT
+        id,
+        from_plan       AS "fromPlan",
+        to_plan         AS "toPlan",
+        payment_method  AS "paymentMethod",
+        payment_reference AS "paymentReference",
+        amount,
+        months_paid     AS "monthsPaid",
+        status,
+        rejection_reason AS "rejectionReason",
+        created_at      AS "createdAt",
+        decided_at      AS "decidedAt"
+      FROM public.upgrade_requests
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+    `, [userId])
+
+    res.json({ success: true, data: rows })
+  } catch (err) {
+    console.error('[upgrade-requests/history GET]', err)
+    res.status(500).json({ success: false, error: 'Erreur serveur' })
+  }
+})
+
+// ── Applications disponibles (catalogue actif, côté utilisateur) ──────────────
+app.get('/api/apps', authenticate, async (_req, res) => {
+  try {
+    const apps = await query(`
+      SELECT id, name, description, category, logo_url AS "logoUrl", active
+      FROM public.app_integrations ORDER BY name
+    `)
+    res.json({ success: true, data: apps })
+  } catch (err) {
+    // Catalogue absent (migration non exécutée) → liste vide, le frontend garde ses défauts
+    res.json({ success: true, data: null })
+  }
+})
+
+// ── Feedback utilisateur (👍/👎 sur les réponses de Bouba) ────────────────────
+app.post('/api/feedback', authenticate, async (req: any, res) => {
+  try {
+    const userId = req.user?.id
+    const { rating, agent, excerpt } = req.body
+    if (!['up', 'down'].includes(rating)) {
+      return res.status(400).json({ success: false, error: 'rating doit être up ou down' })
+    }
+    await query(`
+      INSERT INTO public.user_feedback (user_id, rating, agent, message_excerpt)
+      VALUES ($1, $2, $3, $4)
+    `, [userId, rating, normalizeAgent(agent) || 'general', String(excerpt || '').slice(0, 300)])
+    res.json({ success: true })
+  } catch (err) {
+    console.error('[POST /api/feedback]', err)
+    res.status(500).json({ success: false, error: 'Erreur serveur' })
+  }
+})
+
+// ── Announcements (user-facing) ───────────────────────────────────────────────
+
+// GET /api/announcements — returns unread broadcast notifications for the current user
+app.get('/api/announcements', authenticate, async (req: any, res) => {
+  try {
+    const userId = req.user?.id
+    if (!userId) return res.status(401).json({ success: false, error: 'Non authentifié' })
+
+    const rows = await query(`
+      SELECT
+        n.id,
+        n.campaign_id  AS "campaignId",
+        n.subject      AS title,
+        n.body         AS content,
+        n.type,
+        n.metadata,
+        n.sent_at      AS "sentAt",
+        n.is_read      AS "isRead"
+      FROM public.notifications n
+      WHERE n.user_id = $1
+        AND n.type IN ('broadcast_app')
+        AND n.is_read = false
+      ORDER BY n.sent_at DESC
+      LIMIT 10
+    `, [userId])
+
+    res.json({ success: true, data: rows })
+  } catch (err) {
+    console.error('[GET /api/announcements]', err)
+    res.status(500).json({ success: false, error: 'Erreur serveur' })
+  }
+})
+
+// POST /api/announcements/:id/dismiss — marks a notification as read (dismissed)
+app.post('/api/announcements/:id/dismiss', authenticate, async (req: any, res) => {
+  try {
+    const userId = req.user?.id
+    const { id } = req.params
+    if (!userId) return res.status(401).json({ success: false, error: 'Non authentifié' })
+
+    await query(`
+      UPDATE public.notifications
+      SET is_read = true, read_at = NOW()
+      WHERE id = $1 AND user_id = $2
+    `, [id, userId])
+
+    res.json({ success: true })
+  } catch (err) {
+    console.error('[POST /api/announcements/:id/dismiss]', err)
     res.status(500).json({ success: false, error: 'Erreur serveur' })
   }
 })
@@ -317,21 +754,7 @@ async function createOrGetChatSession(userId: string, sessionId?: string): Promi
   }
 }
 
-// Valid values for the messages.agent_used CHECK constraint
-const VALID_AGENTS = new Set(['email', 'calendar', 'contacts', 'finance', 'search', 'rag', 'general']);
-
-function normalizeAgent(agent?: string | null): string | null {
-  if (!agent) return null;
-  const lower = agent.toLowerCase();
-  if (VALID_AGENTS.has(lower)) return lower;
-  // Map common n8n agent names to valid values
-  if (lower.includes('email') || lower.includes('mail')) return 'email';
-  if (lower.includes('calendar') || lower.includes('agenda')) return 'calendar';
-  if (lower.includes('contact')) return 'contacts';
-  if (lower.includes('finance') || lower.includes('comptab')) return 'finance';
-  if (lower.includes('search') || lower.includes('rag') || lower.includes('vector')) return 'search';
-  return 'general';
-}
+// normalizeAgent / VALID_AGENTS vivent dans api/lib/n8n.ts (partagés avec le parseur)
 
 async function saveMessage(
   sessionId: string,
@@ -449,43 +872,55 @@ app.post('/api/chat', authenticate, async (req: any, res) => {
       await updateSessionTitle(finalSessionId, userId, message);
     }
 
-    // Vérifier les quotas selon le plan de l'utilisateur (non admin)
+    // Vérifier les quotas selon le plan (non admin) — reset mensuel paresseux inclus
     if (!isAdmin) {
       try {
-        const userProfile = await queryOne<{ plan_id: string; messages_used: number; messages_limit: number }>(
-          'SELECT plan_id, messages_used, messages_limit FROM public.profiles WHERE id = $1',
-          [userId]
-        );
-        if (userProfile) {
-          // messages_limit = -1 → illimité (Enterprise)
-          const limit = userProfile.messages_limit !== undefined && userProfile.messages_limit !== null
-            ? userProfile.messages_limit
-            : ({ 'starter': 500, 'free': 500, 'pro': 10000, 'enterprise': -1 }[(userProfile.plan_id || 'free').toLowerCase()] ?? 500);
-          if (limit !== -1 && userProfile.messages_used >= limit) {
-            return res.status(429).json({
-              success: false,
-              error: 'Limite de messages atteinte. Veuillez mettre à niveau votre plan.',
-              code: 'QUOTA_EXCEEDED',
-              limit,
-              used: userProfile.messages_used
-            });
-          }
+        const userProfile = await getProfileWithFreshQuota(userId);
+        if (userProfile && isQuotaExhausted(userProfile)) {
+          return res.status(429).json({
+            success: false,
+            error: 'Limite de messages atteinte. Veuillez mettre à niveau votre plan.',
+            code: 'QUOTA_EXCEEDED',
+            limit: effectiveLimit(userProfile),
+            used: userProfile.messages_used
+          });
         }
       } catch (quotaError) {
         console.warn('[CHAT] Erreur vérification quota:', quotaError);
       }
     }
 
-    // N8N Webhook URL for Bouba chat
-    const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'https://n8n.realtechprint.com/webhook/7f338448-11b5-458c-ada3-f009feccc184';
+    // Détecter l'agent à partir du message pour router vers le bon webhook N8N
+    const lowerMsg = message.toLowerCase();
+    let detectedAgentForRouting: string | null = null;
+    if (lowerMsg.includes('email') || lowerMsg.includes('mail') || lowerMsg.includes('inbox') || lowerMsg.includes('boîte')) {
+      detectedAgentForRouting = 'email';
+    } else if (lowerMsg.includes('calendrier') || lowerMsg.includes('agenda') || lowerMsg.includes('rendez-vous') || lowerMsg.includes('rdv') || lowerMsg.includes('calendar') || lowerMsg.includes('réunion')) {
+      detectedAgentForRouting = 'calendar';
+    } else if (lowerMsg.includes('contact') || lowerMsg.includes('personne') || lowerMsg.includes('client')) {
+      detectedAgentForRouting = 'contacts';
+    } else if (lowerMsg.includes('finance') || lowerMsg.includes('dépense') || lowerMsg.includes('budget') || lowerMsg.includes('transaction') || lowerMsg.includes('argent') || lowerMsg.includes('facture')) {
+      detectedAgentForRouting = 'finance';
+    }
 
-    console.log(`[CHAT] Forwarding to N8N: ${n8nWebhookUrl}`)
+    // Sélection du webhook N8N : agent spécifique si disponible, sinon webhook principal
+    const AGENT_WEBHOOKS: Record<string, string | undefined> = {
+      email:    process.env.N8N_EMAIL_WEBHOOK_URL,
+      calendar: process.env.N8N_CALENDAR_WEBHOOK_URL,
+      contacts: process.env.N8N_CONTACTS_WEBHOOK_URL,
+      finance:  process.env.N8N_FINANCE_WEBHOOK_URL,
+    };
+    const defaultWebhook = process.env.N8N_WEBHOOK_URL || 'https://n8n.realtechprint.com/webhook/7f338448-11b5-458c-ada3-f009feccc184';
+    const n8nWebhookUrl = (detectedAgentForRouting && AGENT_WEBHOOKS[detectedAgentForRouting]) || defaultWebhook;
+
+    console.log(`[CHAT] Forwarding to N8N: ${n8nWebhookUrl} (agent: ${detectedAgentForRouting || 'general'})`)
 
     // ── Contexte utilisateur enrichi (mémoire contextuelle) ──────────────
-    const [userProfileCtx, userMemories, lastAssistantMsg] = await Promise.all([
+    const [userProfileCtx, userMemories, lastAssistantMsg, knowledgeContext] = await Promise.all([
       getUserProfile(userId),
       getUserMemories(userId),
       sessionId ? getLastAssistantMessage(finalSessionId) : Promise.resolve(''),
+      searchKnowledge(userId, message, 2400), // max 3 passages × 800 caractères
     ]);
 
     const userName = [userProfileCtx?.first_name, userProfileCtx?.last_name]
@@ -499,140 +934,203 @@ app.post('/api/chat', authenticate, async (req: any, res) => {
       bouba_tone: (userProfileCtx?.preferences as any)?.bouba_tone || 'professional',
       // Dernier message de Bouba → permet de résoudre "vas-y" / "fais-le"
       last_bouba_message: lastAssistantMsg || null,
-      // Faits mémorisés entre sessions
-      memories: userMemories,
+      // Faits mémorisés entre sessions (max 15, valeurs tronquées à 300 car.)
+      memories: capMemories(userMemories),
+      // Base de connaissance : passages pertinents extraits des documents uploadés
+      knowledge_context: knowledgeContext || null,
+      // Stats business en direct — uniquement pour les admins parlant à Bouba
+      // depuis le panel admin (widget), jamais exposées aux utilisateurs
+      admin_context: (isAdmin && req.body.source === 'admin') ? await getAdminContext() : null,
     };
     // ─────────────────────────────────────────────────────────────────────
 
-    try {
-      // Forward request to N8N avec le bon format attendu par le workflow
-      const n8nResponse = await fetch(n8nWebhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          body: {
-            message: safeMessage,
-            userId: userId,
-            sessionId: finalSessionId,
-            conversation_id: finalSessionId,
-            history: history || [],
-            user_context,
-            timestamp: new Date().toISOString(),
-            tokens_used: 0,
-          }
-        })
-      });
-
-      if (!n8nResponse.ok) {
-        const errorText = await n8nResponse.text();
-        console.error(`[CHAT] N8N webhook failed: ${n8nResponse.status} - ${errorText}`);
-        
-        // En cas d'erreur N8N (webhook non actif, etc.), on simule une réponse
-        if (n8nResponse.status === 404) {
-          console.log('[CHAT] N8N webhook not active, using development simulation');
-          const simulatedResponse = await generateSimulatedResponse(message, userId);
-          
-          // Sauvegarder la réponse simulée
-          await saveMessage(
-            finalSessionId, 
-            userId, 
-            'assistant', 
-            simulatedResponse.output,
-            simulatedResponse.agent
-          );
-          
-          // Mettre à jour les statistiques d'usage (non admin)
-          if (!isAdmin) await updateUsageTracking(userId, simulatedResponse.agent || 'general');
-
-          return res.json({
-            success: true,
-            data: simulatedResponse,
-            sessionId: finalSessionId,
-            timestamp: new Date().toISOString(),
-            mode: 'simulation'
-          });
-        }
-
-        throw new Error(`N8N webhook failed: ${n8nResponse.status}`);
-      }
-
-      let n8nData = await n8nResponse.json();
-      // n8n Respond to Webhook uses .toJsonString() which sends a JSON-encoded string
-      if (typeof n8nData === 'string') {
-        try { n8nData = JSON.parse(n8nData); } catch (_) { /* keep as string */ }
-      }
-      console.log(`[CHAT] N8N response received:`, JSON.stringify(n8nData).substring(0, 200) + '...');
-
-      // Extract the actual message from various n8n response shapes
-      const assistantText = n8nData?.message || n8nData?.output || n8nData?.text || n8nData?.response || (typeof n8nData === 'string' ? n8nData : JSON.stringify(n8nData));
-      const agentUsed = n8nData?.agent || n8nData?.agentUsed || 'general';
-      const tokensUsed = typeof n8nData?.tokens_used === 'number' ? n8nData.tokens_used : 0;
-
-      // Sauvegarder la réponse de N8N
-      await saveMessage(
-        finalSessionId,
-        userId,
-        'assistant',
-        assistantText,
-        agentUsed,
-        tokensUsed
-      );
-      
-      // Mettre à jour les statistiques d'usage (non admin)
-      if (!isAdmin) await updateUsageTracking(userId, agentUsed);
-
-      // Return the response from N8N with normalized shape
-      res.json({
-        success: true,
-        data: {
-          output: assistantText,
-          agent: agentUsed,
-          suggestions: n8nData?.suggestions || [],
-          type: n8nData?.type || 'chat'
-        },
+    // ── Appel n8n (timeout 50 s + latence loggée dans callN8nWebhook) ────
+    const agentLabel = detectedAgentForRouting || 'general';
+    const n8nCall = await callN8nWebhook(n8nWebhookUrl, {
+      body: {
+        message: safeMessage,
+        userId: userId,
         sessionId: finalSessionId,
+        conversation_id: finalSessionId,
+        history: capHistory(history),          // max 6 messages / 600 caractères
+        user_context,
+        agent: agentLabel,
+        source: req.body.source || 'direct',
+        role,
         timestamp: new Date().toISOString(),
-        mode: 'production'
-      });
-      
-    } catch (fetchError) {
-      console.error('[CHAT] N8N fetch error:', fetchError);
-      
-      // En cas d'erreur réseau ou autre, simuler une réponse pour le développement
-      const simulatedResponse = await generateSimulatedResponse(message, userId);
-      
-      // Sauvegarder la réponse simulée
-      await saveMessage(
-        finalSessionId, 
-        userId, 
-        'assistant', 
-        simulatedResponse.output,
-        simulatedResponse.agent
-      );
-      
-      // Mettre à jour les statistiques d'usage (non admin)
-      if (!isAdmin) await updateUsageTracking(userId, simulatedResponse.agent || 'general');
+        tokens_used: 0,
+      }
+    }, agentLabel);
 
-      res.json({
+    let parsed: ParsedN8nResponse = n8nCall.parsed;
+    let mode: 'production' | 'simulation' = 'production';
+
+    // Repli mode démo UNIQUEMENT si le webhook est injoignable/inactif
+    // (404 ou erreur réseau). Un timeout renvoie l'erreur propre du parseur.
+    if (!n8nCall.ok && !n8nCall.timedOut) {
+      console.log('[CHAT] N8N indisponible, bascule en mode démo');
+      const simulated = await generateSimulatedResponse(message, userId);
+      parsed = {
         success: true,
-        data: simulatedResponse,
-        sessionId: finalSessionId,
-        timestamp: new Date().toISOString(),
-        mode: 'simulation'
-      });
+        output: simulated.output,
+        agent: normalizeAgent(simulated.agent) || 'general',
+        suggestions: simulated.suggestions,
+        tokensUsed: 0,
+        raw: simulated,
+      };
+      mode = 'simulation';
     }
+
+    // ── 1.5 : répondre au client AVANT les écritures non critiques ──────
+    res.json({
+      success: parsed.success,   // false = l'agent a planté, output = message d'erreur à afficher
+      output: parsed.output,
+      agent: parsed.agent,
+      suggestions: parsed.suggestions || (parsed.raw?.suggestions ?? []),
+      suggestion: parsed.suggestion,
+      actions: parsed.raw?.actions || [],
+      type: 'chat',
+      sessionId: finalSessionId,
+      timestamp: new Date().toISOString(),
+      mode,
+    });
+
+    // Écritures asynchrones (fire-and-forget) : message assistant + quota.
+    // Le message UTILISATEUR est déjà sauvegardé avant l'appel n8n (synchrone).
+    saveMessage(finalSessionId, userId, 'assistant', parsed.output, parsed.agent, parsed.tokensUsed)
+      .then(savedId => {
+        if (!savedId) {
+          assistantSaveErrors++;
+          console.error(`[CHAT] ÉCHEC sauvegarde message assistant (total: ${assistantSaveErrors}) session=${finalSessionId}`);
+        }
+      })
+      .catch(err => {
+        assistantSaveErrors++;
+        console.error(`[CHAT] ÉCHEC sauvegarde message assistant (total: ${assistantSaveErrors}):`, err);
+      });
+
+    // Quota consommé uniquement si l'agent a réellement répondu (pas d'erreur)
+    if (!isAdmin && parsed.success) {
+      updateUsageTracking(userId, parsed.agent)
+        .catch(err => console.error('[CHAT] Erreur usage tracking:', err));
+    }
+
+    // Journal Monitoring IA (durée n8n, succès, erreur éventuelle)
+    logAiRequest({
+      userId,
+      agent: parsed.agent,
+      source: mode === 'simulation' ? 'simulation' : (req.body.source || 'direct'),
+      durationMs: n8nCall.durationMs,
+      success: parsed.success,
+      errorExcerpt: parsed.success ? null : parsed.output,
+    });
+    return;
 
   } catch (error) {
     console.error('[CHAT] Error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'Chat service unavailable',
       message: process.env.NODE_ENV === 'development' ? (error as Error).message : 'Internal server error'
     });
   }
 });
+
+// Compteur d'erreurs de sauvegarde du message assistant (diagnostic 1.5)
+let assistantSaveErrors = 0;
+
+/**
+ * Contexte business injecté dans Bouba quand un ADMIN lui parle (widget admin) :
+ * l'agent n8n n'a pas d'outils admin, mais avec ces stats en direct dans le
+ * contexte, Bouba peut répondre aux questions de pilotage (MRR, utilisateurs,
+ * actions en attente, santé IA…). Cache 60 s pour ne pas alourdir chaque message.
+ */
+let adminContextCache: { at: number; data: any } | null = null;
+async function getAdminContext(): Promise<any> {
+  if (adminContextCache && Date.now() - adminContextCache.at < 60_000) {
+    return adminContextCache.data;
+  }
+  try {
+    const [stats, pending, ai, agents] = await Promise.all([
+      queryOne<any>(`
+        SELECT
+          (SELECT COUNT(*) FROM public.users) AS total_users,
+          (SELECT COUNT(*) FROM public.profiles WHERE subscription_status = 'active') AS active_users,
+          (SELECT COALESCE(SUM(pl.price), 0) FROM public.profiles p
+             JOIN public.plans pl ON pl.id = p.plan_id
+             WHERE p.subscription_status = 'active' AND pl.price > 0) AS mrr_cents,
+          (SELECT COUNT(*) FROM public.users WHERE created_at >= DATE_TRUNC('month', NOW())) AS new_this_month
+      `),
+      queryOne<any>(`
+        SELECT
+          (SELECT COUNT(*) FROM public.upgrade_requests WHERE status = 'pending') AS upgrades,
+          (SELECT COUNT(*) FROM public.payments WHERE status = 'pending') AS wave_payments,
+          (SELECT COUNT(*) FROM public.support_tickets WHERE status IN ('open','in_progress')) AS tickets,
+          (SELECT COUNT(*) FROM public.profiles WHERE messages_limit > 0 AND messages_used >= messages_limit) AS quota_exhausted
+      `).catch(() => ({})),
+      queryOne<any>(`
+        SELECT COUNT(*) AS requests_24h,
+               COUNT(*) FILTER (WHERE success = false) AS errors_24h,
+               ROUND(AVG(duration_ms)) AS avg_ms
+        FROM public.ai_request_logs WHERE created_at >= NOW() - INTERVAL '24 hours'
+      `).catch(() => ({})),
+      query<any>(`
+        SELECT COALESCE(agent_used, 'general') AS agent, COUNT(*) AS calls
+        FROM public.messages
+        WHERE role = 'assistant' AND created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY 1 ORDER BY calls DESC LIMIT 5
+      `).catch(() => []),
+    ]);
+
+    const mrrEur = Math.round(Number(stats?.mrr_cents || 0)) / 100;
+    const data = {
+      note: 'Statistiques Bouba\'ia en direct — utilise-les pour répondre aux questions de l\'administrateur.',
+      utilisateurs: {
+        total: Number(stats?.total_users || 0),
+        actifs: Number(stats?.active_users || 0),
+        nouveaux_ce_mois: Number(stats?.new_this_month || 0),
+      },
+      revenus: { mrr_eur: mrrEur, arr_eur: mrrEur * 12 },
+      actions_en_attente: {
+        demandes_upgrade: Number(pending?.upgrades || 0),
+        paiements_wave_a_valider: Number(pending?.wave_payments || 0),
+        tickets_support_ouverts: Number(pending?.tickets || 0),
+        quotas_epuises: Number(pending?.quota_exhausted || 0),
+      },
+      sante_ia_24h: {
+        requetes: Number(ai?.requests_24h || 0),
+        erreurs: Number(ai?.errors_24h || 0),
+        temps_moyen_ms: Number(ai?.avg_ms || 0),
+      },
+      agents_7_jours: agents.map((a: any) => ({ agent: a.agent, appels: Number(a.calls) })),
+    };
+    adminContextCache = { at: Date.now(), data };
+    return data;
+  } catch (err) {
+    console.warn('[ADMIN CONTEXT]', (err as Error).message);
+    return null;
+  }
+}
+
+/**
+ * Journalise chaque requête IA (appel n8n) pour le Monitoring admin :
+ * durée, succès/échec, extrait d'erreur. Fire-and-forget, jamais bloquant.
+ */
+function logAiRequest(entry: {
+  userId: string | null;
+  agent: string;
+  source: string;
+  durationMs: number;
+  success: boolean;
+  errorExcerpt?: string | null;
+}) {
+  query(
+    `INSERT INTO public.ai_request_logs (user_id, agent, source, duration_ms, success, error_excerpt)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [entry.userId, entry.agent, entry.source, Math.round(entry.durationMs), entry.success,
+     entry.success ? null : String(entry.errorExcerpt || '').slice(0, 300)]
+  ).catch(err => console.warn('[MONITORING] logAiRequest:', (err as Error).message));
+}
 
 // Route pour sauvegarder des messages individuels (utilisée par le webhook direct)
 app.post('/api/chat/save-message', async (req, res) => {
@@ -832,61 +1330,16 @@ app.post('/api/user-memory/n8n-save', async (req: any, res) => {
 app.get('/api/conversations', authenticate, async (req: any, res) => {
   try {
     const userId = req.user.id;
-    
-    // Mode développement : simuler des conversations
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[CONVERSATIONS DEV] Simulated fetch for user: ${userId}`);
-      
-      const mockConversations = [
-        {
-          id: 'conv-dev-1',
-          title: 'Conversation de test 1',
-          message_count: 3,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        },
-        {
-          id: 'conv-dev-2', 
-          title: 'Conversation de test 2',
-          message_count: 1,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
-      ];
-      
-      return res.json({
-        success: true,
-        conversations: mockConversations,
-        mode: 'development'
-      });
-    }
-    
+
     const conversations = await query(
       'SELECT id, title, message_count, created_at, updated_at FROM public.conversations WHERE user_id = $1 ORDER BY updated_at DESC',
       [userId]
     );
-    
-    res.json({
-      success: true,
-      conversations: conversations
-    });
-    
+
+    res.json({ success: true, conversations });
   } catch (error) {
     console.error('[CONVERSATIONS] Error fetching conversations:', error);
-    
-    // En mode développement, toujours retourner une réponse
-    if (process.env.NODE_ENV === 'development') {
-      return res.json({
-        success: true,
-        conversations: [],
-        mode: 'development-fallback'
-      });
-    }
-    
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch conversations'
-    });
+    res.status(500).json({ success: false, error: 'Failed to fetch conversations' });
   }
 });
 
@@ -897,22 +1350,7 @@ app.post('/api/conversations', authenticate, async (req, res) => {
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
-    // Mode développement : simuler la création
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[CONVERSATIONS DEV] Simulated create for user: ${userId}, title: "${title}"`);
-      const mockConversation = {
-        id: 'conv-dev-' + Date.now(),
-        title: title || 'Nouvelle conversation',
-        message_count: 0,
-        created_at: new Date(),
-        updated_at: new Date()
-      };
-      return res.json({
-        success: true,
-        conversation: mockConversation,
-        mode: 'development'
-      });
-    }
+
     const newConversation = await queryOne<{id: string, title: string}>(
       'INSERT INTO public.conversations (user_id, title) VALUES ($1, $2) RETURNING id, title',
       [userId, title || 'Nouvelle conversation']
@@ -920,6 +1358,7 @@ app.post('/api/conversations', authenticate, async (req, res) => {
     if (!newConversation) {
       throw new Error('Failed to create conversation');
     }
+
     res.json({
       success: true,
       conversation: {
@@ -932,26 +1371,7 @@ app.post('/api/conversations', authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error('[CONVERSATIONS] Error creating conversation:', error);
-    
-    // En mode développement, toujours réussir
-    if (process.env.NODE_ENV === 'development') {
-      return res.json({
-        success: true,
-        conversation: {
-          id: 'conv-dev-fallback-' + Date.now(),
-          title: req.body.title || 'Nouvelle conversation',
-          message_count: 0,
-          created_at: new Date(),
-          updated_at: new Date()
-        },
-        mode: 'development-fallback'
-      });
-    }
-    
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create conversation'
-    });
+    res.status(500).json({ success: false, error: 'Failed to create conversation' });
   }
 });
 
@@ -1151,73 +1571,91 @@ app.post('/api/bouba/action', authenticate, async (req: any, res) => {
     const { message, context, conversation_id } = req.body;
     if (!message) return res.status(400).json({ success: false, error: 'Message requis' });
 
-    // Vérifier les quotas selon le plan de l'utilisateur (non admin)
+    // Vérifier les quotas selon le plan (non admin) — reset mensuel paresseux inclus
     if (!isAdmin) try {
-      const userProfile = await queryOne<{ plan_id: string; messages_used: number; messages_limit: number }>(
-        'SELECT plan_id, messages_used, messages_limit FROM public.profiles WHERE id = $1',
-        [userId]
-      );
-      if (userProfile) {
-        const limit = userProfile.messages_limit !== undefined && userProfile.messages_limit !== null
-          ? userProfile.messages_limit
-          : ({ 'starter': 500, 'free': 500, 'pro': 10000, 'enterprise': -1 }[(userProfile.plan_id || 'free').toLowerCase()] ?? 500);
-        if (limit !== -1 && userProfile.messages_used >= limit) {
-          return res.status(429).json({
-            success: false,
-            error: 'Limite de messages atteinte. Veuillez mettre à niveau votre plan.',
-            code: 'QUOTA_EXCEEDED',
-            limit,
-            used: userProfile.messages_used
-          });
-        }
+      const userProfile = await getProfileWithFreshQuota(userId);
+      if (userProfile && isQuotaExhausted(userProfile)) {
+        return res.status(429).json({
+          success: false,
+          error: 'Limite de messages atteinte. Veuillez mettre à niveau votre plan.',
+          code: 'QUOTA_EXCEEDED',
+          limit: effectiveLimit(userProfile),
+          used: userProfile.messages_used
+        });
       }
     } catch (quotaError) {
       console.warn('[BOUBA ACTION] Erreur vérification quota:', quotaError);
     }
 
-    const fullMessage = context ? `${context}\n\n${message}` : message;
     // Admin users may not have an active conversation — use their userId as stable fallback
     const conversationId = conversation_id || (isAdmin ? userId : null);
 
     const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL || 'https://n8n.realtechprint.com/webhook/7f338448-11b5-458c-ada3-f009feccc184';
 
-    const n8nResponse = await fetch(n8nWebhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        body: {
-          message: fullMessage,
-          userId,
-          sessionId: conversationId,
-          conversation_id: conversationId,
-          history: [],
-          timestamp: new Date().toISOString(),
-          tokens_used: 0,
-          source: isAdmin ? 'admin' : 'page_action',
-        }
-      }),
+    // NB : les actions de page ne sont volontairement PAS persistées dans
+    // public.messages — pas de session chat, le résultat reste local à la page.
+    const source = isAdmin ? 'admin' : 'page_action';
+    const n8nCall = await callN8nWebhook(n8nWebhookUrl, {
+      body: {
+        message,
+        context: capPageContext(context),   // champ séparé (contrat v3.0), tronqué à 4000
+        userId,
+        sessionId: conversationId,
+        conversation_id: conversationId,
+        history: [],
+        agent: 'general',
+        source,
+        role: req.user?.role || 'user',
+        timestamp: new Date().toISOString(),
+        tokens_used: 0,
+      }
+    }, `action:${source}`);
+
+    if (!n8nCall.ok) {
+      // Transport KO (timeout inclus) : message utilisateur propre, pas de quota consommé
+      logAiRequest({
+        userId,
+        agent: n8nCall.parsed.agent,
+        source,
+        durationMs: n8nCall.durationMs,
+        success: false,
+        errorExcerpt: n8nCall.timedOut ? 'Timeout n8n (> 50 s)' : n8nCall.parsed.output,
+      });
+      return res.status(502).json({
+        success: false,
+        output: n8nCall.parsed.output,
+        agent: n8nCall.parsed.agent,
+        error: n8nCall.parsed.output,
+      });
+    }
+
+    const parsed = n8nCall.parsed;
+
+    // 1.5 : répondre d'abord, écritures non critiques ensuite
+    res.json({
+      success: parsed.success,   // false = l'agent a planté, output = message d'erreur
+      output: parsed.output,
+      agent: parsed.agent,
+      suggestion: parsed.suggestion,
+      raw: parsed.raw,
     });
 
-    if (!n8nResponse.ok) {
-      const errText = await n8nResponse.text();
-      console.error(`[BOUBA ACTION] n8n error ${n8nResponse.status}: ${errText}`);
-      return res.status(502).json({ success: false, error: 'Bouba est temporairement indisponible' });
+    if (!isAdmin && parsed.success) {
+      updateUsageTracking(userId, 'bouba_action').catch(err =>
+        console.warn('[BOUBA ACTION] Usage tracking error:', err)
+      );
     }
 
-    let n8nData = await n8nResponse.json();
-    if (typeof n8nData === 'string') {
-      try { n8nData = JSON.parse(n8nData); } catch { /* keep as string */ }
-    }
-
-    const output = n8nData?.output || n8nData?.message || n8nData?.text || n8nData?.response
-      || (typeof n8nData === 'string' ? n8nData : JSON.stringify(n8nData));
-
-    // Incrémenter le compteur de messages (non admin)
-    if (!isAdmin) updateUsageTracking(userId, 'bouba_action').catch(err =>
-      console.warn('[BOUBA ACTION] Usage tracking error:', err)
-    );
-
-    res.json({ success: true, output, raw: n8nData });
+    // Journal Monitoring IA
+    logAiRequest({
+      userId,
+      agent: parsed.agent,
+      source,
+      durationMs: n8nCall.durationMs,
+      success: parsed.success,
+      errorExcerpt: parsed.success ? null : parsed.output,
+    });
+    return;
   } catch (error: any) {
     console.error('[BOUBA ACTION] Error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -1246,7 +1684,25 @@ app.post('/api/n8n/user-activated', async (req, res) => {
 });
 
 // Fonction de simulation pour le développement
+// Préfixe systématique du mode démo : on ne doit JAMAIS confondre une
+// simulation avec une vraie action exécutée par n8n (mission 1.7).
+const DEMO_PREFIX = '🧪 *(Mode démo — n8n indisponible)*\n\n';
+
 async function generateSimulatedResponse(message: string, userId?: string): Promise<any> {
+  const raw = await generateSimulatedResponseInner(message, userId);
+  // Format aligné sur parseN8nResponse : { success, output, agent, suggestions, actions }
+  return {
+    success: true,
+    output: DEMO_PREFIX + (raw.output || ''),
+    agent: normalizeAgent(raw.agent) || 'general',
+    suggestions: raw.suggestions || [],
+    actions: raw.actions || [],
+    tokens_used: 0,
+    type: 'chat',
+  };
+}
+
+async function generateSimulatedResponseInner(message: string, userId?: string): Promise<any> {
   const lowerMessage = message.toLowerCase();
 
   // --- CONTACT CREATION ---
@@ -1495,7 +1951,7 @@ app.get('/api/google/gmail/messages/:msgId/attachments/:attId', authenticate, as
       return res.status(attResp.status).json({ success: false, error: 'Pièce jointe non trouvée' });
     }
 
-    const attData = await attResp.json();
+    const attData: any = await attResp.json();
     const buffer = Buffer.from(attData.data, 'base64url');
     const contentType = (req.query.type as string) || 'application/octet-stream';
     const filename = (req.query.name as string) || 'attachment';
@@ -1600,7 +2056,7 @@ app.get('/api/google/gmail/messages/:id', authenticate, async (req: any, res) =>
       return res.status(msgResp.status).json({ success: false, error: 'Message non trouvé' });
     }
 
-    const msg = await msgResp.json();
+    const msg: any = await msgResp.json();
     res.json({ success: true, data: parseGmailMessage(msg) });
   } catch (error: any) {
     console.error('Gmail get message error:', error);
@@ -1713,7 +2169,7 @@ app.post('/api/google/gmail/send', authenticate, async (req: any, res) => {
       return res.status(500).json({ success: false, error: `Erreur envoi: ${errText}` });
     }
 
-    const sentMsg = await sendResp.json();
+    const sentMsg: any = await sendResp.json();
     res.json({ success: true, data: sentMsg });
   } catch (error: any) {
     console.error('Gmail send error:', error);
@@ -1827,7 +2283,7 @@ app.post('/api/google/calendar/events', authenticate, async (req: any, res) => {
       return res.status(500).json({ success: false, error: `Erreur création: ${errText}` });
     }
 
-    const created = await createResp.json();
+    const created: any = await createResp.json();
     res.json({ success: true, data: created });
   } catch (error: any) {
     console.error('Calendar create event error:', error);
@@ -2061,7 +2517,7 @@ app.post('/api/oauth/exchange', async (req, res) => {
       }).toString(),
     });
 
-    const tokenData = await tokenResponse.json();
+    const tokenData: any = await tokenResponse.json();
 
     if (!tokenResponse.ok) {
       console.error('[OAUTH] Token exchange failed:', tokenData);
@@ -2094,7 +2550,7 @@ app.post('/api/oauth/userinfo', async (req, res) => {
       headers: { Authorization: `Bearer ${access_token}` }
     });
 
-    const userInfo = await userInfoResponse.json();
+    const userInfo: any = await userInfoResponse.json();
 
     if (!userInfoResponse.ok) {
       return res.status(400).json({ success: false, error: userInfo.error?.message || 'Failed to get user info' });
@@ -2137,7 +2593,7 @@ app.post('/api/oauth/refresh', async (req, res) => {
       }).toString(),
     });
 
-    const tokenData = await tokenResponse.json();
+    const tokenData: any = await tokenResponse.json();
 
     if (!tokenResponse.ok) {
       return res.status(400).json({ success: false, error: tokenData.error_description || tokenData.error || 'Refresh failed' });
@@ -2181,7 +2637,7 @@ app.post('/api/oauth/validate', async (req, res) => {
 
   try {
     const response = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(token)}`);
-    const data = await response.json();
+    const data: any = await response.json();
     return res.json({ valid: response.ok && !data.error, expires_in: data.expires_in });
   } catch (error: any) {
     return res.json({ valid: false });
@@ -2557,6 +3013,99 @@ app.post('/api/finance/goals', authenticate, async (req: any, res) => {
 });
 
 // ==========================================
+// FINANCE DOCUMENTS (invoices, quotes, etc.)
+// ==========================================
+
+// GET /api/finance/documents - List user documents
+app.get('/api/finance/documents', authenticate, async (req: any, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  try {
+    const data = await query<any>(
+      'SELECT * FROM public.finance_documents WHERE user_id=$1 ORDER BY created_at DESC',
+      [userId]
+    );
+    return res.json({ success: true, data: data || [] });
+  } catch (error: any) {
+    console.error('[FINANCE_DOCS] list error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/finance/documents - Save a document
+app.post('/api/finance/documents', authenticate, async (req: any, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  const {
+    type, number, date, status,
+    company_name, company_logo, company_address, company_city, company_postal_code,
+    company_country, company_phone, company_email, company_website, company_siret,
+    company_vat, company_legal_form,
+    client_name, client_email, client_address,
+    items, vat_rate, total_ht, total_tva, total_ttc, notes,
+  } = req.body;
+  if (!type || !number) return res.status(400).json({ success: false, error: 'type and number required' });
+  try {
+    const result = await queryOne<any>(
+      `INSERT INTO public.finance_documents
+        (user_id, type, number, date, status,
+         company_name, company_logo, company_address, company_city, company_postal_code,
+         company_country, company_phone, company_email, company_website, company_siret,
+         company_vat, company_legal_form,
+         client_name, client_email, client_address,
+         items, vat_rate, total_ht, total_tva, total_ttc, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+       RETURNING *`,
+      [
+        userId, type, number, date || new Date().toISOString(), status || 'draft',
+        company_name || '', company_logo || '', company_address || '', company_city || '',
+        company_postal_code || '', company_country || '', company_phone || '',
+        company_email || '', company_website || '', company_siret || '',
+        company_vat || '', company_legal_form || '',
+        client_name || '', client_email || '', client_address || '',
+        JSON.stringify(items || []), vat_rate || 0, total_ht || 0, total_tva || 0, total_ttc || 0, notes || '',
+      ]
+    );
+    return res.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error('[FINANCE_DOCS] create error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PATCH /api/finance/documents/:id/status - Update document status
+app.patch('/api/finance/documents/:id/status', authenticate, async (req: any, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  const { status } = req.body;
+  if (!status) return res.status(400).json({ success: false, error: 'status required' });
+  try {
+    await query(
+      'UPDATE public.finance_documents SET status=$1 WHERE id=$2 AND user_id=$3',
+      [status, req.params.id, userId]
+    );
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/finance/documents/:id - Delete a document
+app.delete('/api/finance/documents/:id', authenticate, async (req: any, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  try {
+    await query(
+      'DELETE FROM public.finance_documents WHERE id=$1 AND user_id=$2',
+      [req.params.id, userId]
+    );
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==========================================
 // AI GENERATION PROXY (server-side Gemini)
 // ==========================================
 
@@ -2568,14 +3117,15 @@ app.post('/api/ai/generate', authenticate, async (req: any, res) => {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      // Fallback: return a sensible default when no Gemini key
+      // Repli sans clé Gemini : réponses par défaut marquées « suggestion générique »
+      // pour ne jamais les confondre avec une vraie génération IA (mission 3.2).
       if (type === 'email_draft') {
-        return res.json({ success: true, data: { subject: 'Réponse à votre demande', body: '<p>Bonjour,</p><p>Faisant suite à votre demande, voici ma réponse.</p><p>Cordialement</p>' }});
+        return res.json({ success: true, generic: true, data: { subject: 'Réponse à votre demande (suggestion générique)', body: '<p>Bonjour,</p><p>Faisant suite à votre demande, voici ma réponse.</p><p>Cordialement</p>' }});
       }
       if (type === 'smart_replies') {
-        return res.json({ success: true, data: ["D'accord, merci.", "Je reviens vers vous.", "C'est noté."] });
+        return res.json({ success: true, generic: true, data: ["D'accord, merci.", "Je reviens vers vous.", "C'est noté."] });
       }
-      return res.json({ success: true, data: 'Résumé indisponible (clé API non configurée).' });
+      return res.json({ success: true, generic: true, data: 'Résumé indisponible (suggestion générique — clé Gemini non configurée).' });
     }
 
     const geminiRes = await fetch(
@@ -2590,7 +3140,7 @@ app.post('/api/ai/generate', authenticate, async (req: any, res) => {
       }
     );
 
-    const geminiData = await geminiRes.json();
+    const geminiData: any = await geminiRes.json();
     const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     if (responseMimeType === 'application/json') {
@@ -2614,103 +3164,169 @@ app.post('/api/ai/generate', authenticate, async (req: any, res) => {
 // KNOWLEDGE BASE ENDPOINTS
 // ==========================================
 
-// Helper: check Enterprise plan access
-async function requireEnterprise(req: any, res: any): Promise<boolean> {
-  const userId = req.user?.id;
-  if (!userId) { res.status(401).json({ success: false, error: 'Unauthorized' }); return false; }
-  const role = req.user?.role;
-  if (role === 'admin' || role === 'superadmin') return true; // admins bypass
-  try {
-    const profile = await queryOne<{ plan_id: string }>(
-      'SELECT plan_id FROM public.profiles WHERE id = $1', [userId]
-    );
-    if (profile?.plan_id !== 'enterprise') {
-      res.status(403).json({
-        success: false,
-        error: 'La base de connaissances est réservée au plan Enterprise.',
-        code: 'ENTERPRISE_REQUIRED',
-      });
-      return false;
-    }
-  } catch {
-    res.status(500).json({ success: false, error: 'Erreur serveur' });
-    return false;
-  }
-  return true;
-}
-
-// GET /api/knowledge/documents
+// GET /api/knowledge/documents — liste les documents de l'utilisateur courant
 app.get('/api/knowledge/documents', authenticate, async (req: any, res) => {
-  if (!await requireEnterprise(req, res)) return;
   const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
   try {
     const docs = await query<any>(
-      'SELECT id, name, size_bytes, created_at, status, chunk_count FROM public.knowledge_documents WHERE user_id=$1 ORDER BY created_at DESC',
+      `SELECT id, name, file_type, size_bytes, created_at, status, chunk_count
+       FROM public.knowledge_documents
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
       [userId]
     );
     res.json({ success: true, data: docs });
-  } catch (e: any) {
-    // Table may not exist yet — return empty list gracefully
+  } catch {
     res.json({ success: true, data: [] });
   }
 });
 
-// POST /api/knowledge/upload — multipart form with field "file"
-app.post('/api/knowledge/upload', authenticate, async (req: any, res) => {
-  if (!await requireEnterprise(req, res)) return;
-  const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
-  try {
-    // We use express.raw or a header check. For now, accept JSON metadata and store a record.
-    // Real implementation would parse multipart with multer and store the file.
-    const { name, size_bytes } = req.body || {};
-    if (!name) return res.status(400).json({ success: false, error: 'name required' });
-    const doc = await queryOne<any>(
-      `INSERT INTO public.knowledge_documents (id, user_id, name, size_bytes, status, created_at, updated_at)
-       VALUES (gen_random_uuid(), $1, $2, $3, 'processing', NOW(), NOW()) RETURNING *`,
-      [userId, name, size_bytes || 0]
-    );
-    res.json({ success: true, data: doc });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
+// POST /api/knowledge/upload — upload + parsing réel du fichier
+// L'erreur multer (mauvais format, trop gros) est capturée via le 4e argument Express
+app.post(
+  '/api/knowledge/upload',
+  authenticate,
+  (req: any, res: any, next: any) => {
+    knowledgeUpload.single('file')(req, res, (err: any) => {
+      if (err) {
+        // Multer a rejeté le fichier (format, taille, etc.)
+        return res.status(400).json({ success: false, error: err.message || 'Fichier invalide' });
+      }
+      next();
+    });
+  },
+  async (req: any, res: any) => {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    const file = req.file;
+    if (!file) return res.status(400).json({ success: false, error: 'Aucun fichier reçu dans le champ "file"' });
+
+    const ext = (file.originalname.split('.').pop() || '').toLowerCase();
+
+    // Tenter de parser le contenu — on ne bloque pas si c'est vide ou illisible
+    let content = '';
+    let parseWarning: string | null = null;
+    try {
+      content = await extractFileContent(file.buffer, file.originalname);
+    } catch (parseErr: any) {
+      console.error('[KNOWLEDGE] parse error:', parseErr);
+      parseWarning = 'Le contenu n\'a pas pu être extrait automatiquement.';
+    }
+
+    // PDF scanné ou fichier binaire sans texte → on l'enregistre quand même
+    if (!content.trim()) {
+      parseWarning = parseWarning || 'Aucun texte extractible trouvé (PDF scanné ou fichier vide).';
+      content = '';
+    }
+
+    const chunkCount = content
+      ? content.split(/\n{2,}/).filter(c => c.trim()).length
+      : 0;
+
+    // Status : indexed si on a du contenu, sinon 'error' avec avertissement
+    const status = content.trim() ? 'indexed' : 'error';
+
+    try {
+      const doc = await queryOne<any>(
+        `INSERT INTO public.knowledge_documents
+           (id, user_id, name, file_type, size_bytes, status, chunk_count, content, created_at, updated_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+         RETURNING id, name, file_type, size_bytes, status, chunk_count, created_at`,
+        [userId, file.originalname, ext, file.size, status, chunkCount, content || null]
+      );
+      console.log(`[KNOWLEDGE] Document enregistré : ${file.originalname} — status=${status}, chunks=${chunkCount}, chars=${content.length}`);
+      res.json({ success: true, data: doc, warning: parseWarning });
+    } catch (e: any) {
+      console.error('[KNOWLEDGE] DB insert error:', e);
+      res.status(500).json({ success: false, error: e.message });
+    }
   }
-});
+);
 
 // DELETE /api/knowledge/documents/:id
 app.delete('/api/knowledge/documents/:id', authenticate, async (req: any, res) => {
-  if (!await requireEnterprise(req, res)) return;
   const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
   try {
-    await query('DELETE FROM public.knowledge_documents WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+    await query(
+      'DELETE FROM public.knowledge_documents WHERE id = $1 AND user_id = $2',
+      [req.params.id, userId]
+    );
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// POST /api/knowledge/query — ask a question to the knowledge base
+// POST /api/knowledge/query — tester la base de connaissance
 app.post('/api/knowledge/query', authenticate, async (req: any, res) => {
-  if (!await requireEnterprise(req, res)) return;
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
   const { question } = req.body || {};
-  if (!question) return res.status(400).json({ success: false, error: 'question required' });
+  if (!question) return res.status(400).json({ success: false, error: 'question requis' });
+
   try {
-    // If no Gemini key, return a placeholder
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.json({ success: true, answer: 'La base de connaissance est opérationnelle. Configurez GEMINI_API_KEY pour activer les réponses IA sur vos documents.' });
+    const context = await searchKnowledge(userId, question, 4000);
+
+    if (!context) {
+      return res.json({
+        success: true,
+        answer: "Aucune information pertinente trouvée dans vos documents pour cette question. Vérifiez que vous avez importé des fichiers et qu'ils sont bien indexés.",
+        found: false,
+      });
     }
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: `Réponds à cette question en te basant sur la base de connaissances de l'utilisateur: "${question}"` }] }] })
+
+    // Synthèse via N8N (Bouba)
+    // On injecte le contexte directement dans le message car le workflow N8N
+    // ne lit pas user_context.knowledge_context dans le prompt IA.
+    const n8nUrl = process.env.N8N_WEBHOOK_URL || 'https://n8n.realtechprint.com/webhook/7f338448-11b5-458c-ada3-f009feccc184';
+    const messageWithContext = `[BASE DE CONNAISSANCE DE L'UTILISATEUR]\n${context}\n[/BASE DE CONNAISSANCE]\n\n${question}`;
+    try {
+      const n8nRes = await fetch(n8nUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          body: {
+            message: messageWithContext,
+            userId,
+            sessionId: `knowledge-query-${userId}`,
+            conversation_id: `knowledge-query-${userId}`,
+            history: [],
+            user_context: {},
+            agent: 'general',
+            timestamp: new Date().toISOString(),
+          }
+        }),
+      });
+
+      if (n8nRes.ok) {
+        const rawText = await n8nRes.text();
+        if (rawText?.trim()) {
+          let n8nData: any = rawText;
+          try { n8nData = JSON.parse(rawText); } catch (_) {}
+          if (typeof n8nData === 'string') {
+            try { n8nData = JSON.parse(n8nData); } catch (_) {}
+          }
+          const answer = typeof n8nData === 'string'
+            ? n8nData
+            : (n8nData?.message || n8nData?.output || n8nData?.text || n8nData?.response);
+          if (answer?.trim()) {
+            return res.json({ success: true, answer: answer.trim(), found: true });
+          }
+        }
       }
-    );
-    const gData = await geminiRes.json();
-    const answer = gData?.candidates?.[0]?.content?.parts?.[0]?.text || 'Aucune réponse disponible.';
-    res.json({ success: true, answer });
+    } catch (n8nErr) {
+      console.warn('[KNOWLEDGE] N8N error, falling back to raw context:', n8nErr);
+    }
+
+    // Fallback : passages bruts si N8N inaccessible
+    res.json({
+      success: true,
+      answer: `Informations trouvées dans vos documents :\n\n${context}`,
+      found: true,
+    });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -2735,6 +3351,17 @@ app.listen(port, () => {
   console.log(`📊 Health check: http://localhost:${port}/health`);
   console.log(`💳 Stripe webhooks: http://localhost:${port}/api/webhooks/stripe`);
   console.log(`🔄 N8N webhooks: http://localhost:${port}/api/n8n/user-activated`);
+
+  // ── Factures d'échéance de fin de mois — envoi automatique ──────────
+  // Vérifie au démarrage (après 30 s) puis toutes les 12 h. Idempotent
+  // (table renewal_invoice_log). Désactivable : AUTO_RENEWAL_INVOICES=false.
+  if (process.env.AUTO_RENEWAL_INVOICES !== 'false') {
+    setTimeout(() => processAutoRenewalInvoices(), 30_000);
+    setInterval(() => processAutoRenewalInvoices(), 12 * 3600 * 1000);
+    console.log('📄 Envoi automatique des factures de renouvellement : actif (toutes les 12 h)');
+  } else {
+    console.log('📄 Envoi automatique des factures de renouvellement : désactivé (AUTO_RENEWAL_INVOICES=false)');
+  }
   
   // Verify required environment variables
   const requiredEnvVars = [

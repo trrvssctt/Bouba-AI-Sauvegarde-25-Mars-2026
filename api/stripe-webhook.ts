@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { Request, Response } from 'express';
 import { query, queryOne } from './lib/db';
+import { sendPaymentConfirmationEmail, sendPlanChangeEmail } from './lib/email';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
@@ -197,18 +198,29 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     console.error('N8N notification error:', err);
   }
 
+  // Email de confirmation de paiement (non bloquant)
+  sendPaymentConfirmationEmail(email, first_name, plan_id || 'pro', session.amount_total || 0, session.currency || 'eur')
+    .catch(err => console.warn('[EMAIL] sendPaymentConfirmationEmail failed:', err));
+
   console.log(`✓ New account created via Stripe webhook: ${email} (user_id: ${newUser.id})`);
 }
 
 async function handleSubscriptionChange(subscription: Stripe.Subscription) {
   const { user_id, plan_id } = subscription.metadata || {};
-  
+
   if (!user_id) {
     console.error('Missing user_id in subscription metadata:', subscription.id);
     return;
   }
 
   const status = mapStripeStatusToLocal(subscription.status);
+
+  // Récupérer l'ancien plan pour l'email de changement
+  const oldSub = await queryOne<{ plan_id: string }>(
+    'SELECT plan_id FROM public.subscriptions WHERE stripe_subscription_id = $1',
+    [subscription.id]
+  );
+  const oldPlanId = oldSub?.plan_id;
 
   // Update subscription in database
   await query(
@@ -226,6 +238,20 @@ async function handleSubscriptionChange(subscription: Stripe.Subscription) {
       subscription.cancel_at_period_end
     ]
   );
+
+  // Email de changement de plan si le plan a réellement changé
+  if (oldPlanId && plan_id && oldPlanId !== plan_id && status === 'active') {
+    const user = await queryOne<{ email: string; first_name: string | null }>(
+      `SELECT u.email, p.first_name FROM public.users u
+       JOIN public.profiles p ON p.id = u.id
+       WHERE u.id = $1`,
+      [user_id]
+    );
+    if (user) {
+      sendPlanChangeEmail(user.email, user.first_name, oldPlanId, plan_id)
+        .catch(err => console.warn('[EMAIL] sendPlanChangeEmail failed:', err));
+    }
+  }
 
   console.log('Updated subscription for user:', user_id, 'status:', status);
 }
@@ -340,7 +366,6 @@ function mapStripeStatusToLocal(status: Stripe.Subscription.Status): string {
     case 'past_due':
       return 'past_due';
     case 'canceled':
-    case 'cancelled':
       return 'cancelled';
     case 'incomplete':
     case 'incomplete_expired':
