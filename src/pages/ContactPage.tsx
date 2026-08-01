@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'motion/react'
 import {
   Mail, Phone, MapPin, Clock, Send, CheckCircle2,
   MessageCircle, HelpCircle, Building2, Sparkles,
-  ChevronDown, ChevronUp, ExternalLink, ArrowRight,
-  Twitter, Linkedin,
+  ChevronDown, ChevronUp, ExternalLink,
+  Twitter, Linkedin, Shield, FileText, Zap,
 } from 'lucide-react'
 import PublicHeader from '@/src/components/layout/PublicHeader'
 import PublicFooter from '@/src/components/layout/PublicFooter'
@@ -19,6 +19,7 @@ const CONTACT_CHANNELS = [
     href: 'mailto:support@bouba-ia.com',
     color: 'text-blue-600',
     bg: 'bg-blue-50',
+    border: 'border-blue-100 hover:border-blue-300',
     delay: '24h',
   },
   {
@@ -29,6 +30,7 @@ const CONTACT_CHANNELS = [
     href: 'mailto:sales@bouba-ia.com',
     color: 'text-violet-600',
     bg: 'bg-violet-50',
+    border: 'border-violet-100 hover:border-violet-300',
     delay: '4h',
   },
   {
@@ -37,18 +39,20 @@ const CONTACT_CHANNELS = [
     desc: 'RGPD, demandes de données, signalements',
     value: 'legal@bouba-ia.com',
     href: 'mailto:legal@bouba-ia.com',
-    color: 'text-green-600',
-    bg: 'bg-green-50',
+    color: 'text-emerald-600',
+    bg: 'bg-emerald-50',
+    border: 'border-emerald-100 hover:border-emerald-300',
     delay: '48h',
   },
   {
     icon: Sparkles,
     title: 'Presse & Médias',
-    desc: 'Interviews, articles, partenariats presse',
+    desc: 'Interviews, articles, partenariats',
     value: 'presse@bouba-ia.com',
     href: 'mailto:presse@bouba-ia.com',
     color: 'text-amber-600',
     bg: 'bg-amber-50',
+    border: 'border-amber-100 hover:border-amber-300',
     delay: '24h',
   },
 ]
@@ -64,7 +68,7 @@ const FAQ = [
   },
   {
     q: 'Bouba\'ia est-il disponible en anglais ?',
-    a: 'Bouba\'ia est principalement conçu pour les entrepreneurs francophones. L\'interface est en français. Cependant, l\'assistant IA peut comprendre et répondre en anglais, arabe et d\'autres langues sur demande.',
+    a: 'Bouba\'ia est principalement conçu pour les entrepreneurs francophones. L\'interface est en français, mais l\'assistant IA peut comprendre et répondre en anglais, arabe et d\'autres langues.',
   },
   {
     q: 'Puis-je utiliser Bouba\'ia pour mon équipe ?',
@@ -80,7 +84,7 @@ const FAQ = [
   },
   {
     q: 'Y a-t-il une version gratuite ?',
-    a: 'Oui, le plan Starter inclut 100 messages par mois et l\'accès au chat IA de base. C\'est amplement suffisant pour découvrir Bouba\'ia. Aucune carte bancaire requise pour l\'inscription.',
+    a: 'Oui, le plan Free inclut 500 messages par mois et l\'accès au chat IA de base. C\'est idéal pour découvrir Bouba\'ia. Aucune carte bancaire requise pour l\'inscription.',
   },
   {
     q: 'Puis-je tester avant de payer ?',
@@ -103,14 +107,13 @@ function FAQItem({ q, a }: { q: string; a: string }) {
   return (
     <button
       onClick={() => setOpen(o => !o)}
-      className="w-full text-left bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+      className="w-full text-left bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-blue-100 hover:shadow-sm transition-all"
     >
       <div className="flex items-center justify-between gap-4 p-5">
         <span className="font-semibold text-gray-900 text-sm">{q}</span>
         {open
-          ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
-          : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-        }
+          ? <ChevronUp className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
       </div>
       <AnimatePresence>
         {open && (
@@ -118,10 +121,10 @@ function FAQItem({ q, a }: { q: string; a: string }) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <div className="px-5 pb-5 pt-0 text-sm text-gray-600 leading-relaxed border-t border-gray-100">
+            <div className="px-5 pb-5 text-sm text-gray-600 leading-relaxed border-t border-gray-100 pt-3">
               {a}
             </div>
           </motion.div>
@@ -152,17 +155,12 @@ export default function ContactPage() {
     }
     setSending(true)
     setError('')
-
-    // Simulate sending (replace with real API call)
     await new Promise(r => setTimeout(r, 1200))
-
-    // Open mail client as fallback
     const subject = encodeURIComponent(`[Bouba'ia Contact] ${formState.subject}`)
     const body = encodeURIComponent(
       `Prénom: ${formState.firstName}\nNom: ${formState.lastName}\nEmail: ${formState.email}\nEntreprise: ${formState.company}\n\n${formState.message}`
     )
     window.open(`mailto:contact@bouba-ia.com?subject=${subject}&body=${body}`)
-
     setSending(false)
     setSent(true)
   }
@@ -171,43 +169,69 @@ export default function ContactPage() {
     <div className="min-h-screen bg-white">
       <PublicHeader />
 
-      {/* Hero */}
-      <section className="pt-32 pb-16 bg-gradient-to-br from-blue-50 to-violet-50 px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <span className="inline-flex items-center gap-2 bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-full mb-6">
+      {/* ── Hero ── */}
+      <section className="pt-32 pb-20 bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 px-6 relative overflow-hidden">
+        {/* subtle grid bg */}
+        <div className="absolute inset-0 opacity-10"
+          style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)', backgroundSize: '40px 40px' }} />
+        <div className="max-w-4xl mx-auto text-center relative">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+            <span className="inline-flex items-center gap-2 bg-white/10 text-blue-200 text-xs font-semibold px-4 py-1.5 rounded-full mb-6 border border-white/10">
               <MessageCircle className="w-3.5 h-3.5" /> Nous contacter
             </span>
-            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-4">
-              On est là pour vous <span className="text-blue-600">aider</span>
+            <h1 className="text-4xl sm:text-5xl font-bold text-white mb-4 leading-tight">
+              On est là pour vous{' '}
+              <span className="text-blue-400">aider</span>
             </h1>
-            <p className="text-lg text-gray-600 max-w-xl mx-auto">
-              Une question, un problème, une idée ? Notre équipe répond généralement en moins de 24h. Pour les urgences, c'est encore plus rapide.
+            <p className="text-blue-200/80 text-lg max-w-xl mx-auto leading-relaxed">
+              Une question, un problème, une idée ? Notre équipe répond en moins de 24h. Pour les urgences, encore plus vite.
             </p>
+          </motion.div>
+
+          {/* Response time chips */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+            className="flex flex-wrap items-center justify-center gap-3 mt-8"
+          >
+            {[
+              { icon: Zap, label: 'Urgences : < 2h' },
+              { icon: Mail, label: 'Support : < 24h' },
+              { icon: Shield, label: 'Données sécurisées' },
+            ].map(({ icon: Icon, label }) => (
+              <div key={label} className="flex items-center gap-1.5 bg-white/10 border border-white/10 text-white/70 text-xs px-3 py-1.5 rounded-full">
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </div>
+            ))}
           </motion.div>
         </div>
       </section>
 
-      {/* Contact channels */}
-      <section className="py-12 px-6 border-b border-gray-100">
+      {/* ── Contact channels ── */}
+      <section className="py-14 px-6 border-b border-gray-100">
         <div className="max-w-5xl mx-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {CONTACT_CHANNELS.map((ch, i) => {
               const Icon = ch.icon
               return (
-                <motion.a key={ch.title}
+                <motion.a
+                  key={ch.title}
                   href={ch.href}
-                  initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.08 }}
-                  className="group bg-white border border-gray-100 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-1 text-left"
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.07 }}
+                  className={cn(
+                    'group bg-white border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-1 text-left',
+                    ch.border
+                  )}
                 >
-                  <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mb-3', ch.bg, ch.color)}>
-                    <Icon className="w-5 h-5" />
+                  <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mb-3', ch.bg)}>
+                    <Icon className={cn('w-5 h-5', ch.color)} />
                   </div>
                   <h3 className="font-semibold text-gray-900 text-sm mb-1">{ch.title}</h3>
                   <p className="text-xs text-gray-500 mb-3 leading-relaxed">{ch.desc}</p>
-                  <p className={cn('text-xs font-medium group-hover:underline', ch.color)}>{ch.value}</p>
-                  <div className="flex items-center gap-1 mt-2">
+                  <p className={cn('text-xs font-medium group-hover:underline truncate', ch.color)}>{ch.value}</p>
+                  <div className="flex items-center gap-1.5 mt-2">
                     <Clock className="w-3 h-3 text-gray-300" />
                     <span className="text-xs text-gray-400">Réponse sous {ch.delay}</span>
                   </div>
@@ -218,43 +242,83 @@ export default function ContactPage() {
         </div>
       </section>
 
-      {/* Main: Form + Info */}
-      <section className="py-16 px-6">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-12">
-          {/* Form */}
-          <div className="lg:col-span-3">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Envoyer un message</h2>
-            <p className="text-gray-500 text-sm mb-8">Décrivez votre besoin et nous vous répondrons rapidement.</p>
+      {/* ── Main: Form + Info ── */}
+      <section className="py-20 px-6 bg-gradient-to-b from-white via-slate-50/50 to-white">
+        <div className="max-w-6xl mx-auto">
+          {/* Section header */}
+          <div className="text-center mb-12">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 text-blue-700 text-sm font-semibold px-5 py-2 rounded-full mb-4"
+            >
+              <MessageCircle className="w-4 h-4" />
+              Parlez-nous
+            </motion.div>
+            <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
+              Une question ? <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">Nous sommes là</span>
+            </h2>
+            <p className="text-gray-500 text-lg max-w-2xl mx-auto">
+              Remplissez le formulaire ci-dessous et notre équipe vous répondra sous 24h ouvrées.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 xl:gap-12">
+
+            {/* Form - Larger and more prominent */}
+            <div className="lg:col-span-3 xl:col-span-3">
 
             <AnimatePresence mode="wait">
               {sent ? (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-                  className="text-center py-16 bg-green-50 rounded-2xl border border-green-100"
+                  key="success"
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                  className="flex flex-col items-center text-center py-20 bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 rounded-3xl border border-green-200 shadow-lg shadow-green-500/10"
                 >
-                  <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-4" />
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">Message envoyé !</h3>
-                  <p className="text-gray-600 text-sm mb-6 max-w-xs mx-auto">
-                    Merci {formState.firstName}. Notre équipe vous répondra dans les prochaines heures.
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 200, damping: 15, delay: 0.2 }}
+                    className="w-20 h-20 bg-gradient-to-br from-green-400 to-emerald-500 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-green-500/30"
+                  >
+                    <CheckCircle2 className="w-10 h-10 text-white" />
+                  </motion.div>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Message envoyé !</h3>
+                  <p className="text-gray-500 text-base mb-8 max-w-md">
+                    Merci <span className="font-semibold text-gray-700">{formState.firstName}</span>.
+                    Notre équipe vous répondra dans les prochaines heures.
                   </p>
                   <button
                     onClick={() => { setSent(false); setFormState({ firstName: '', lastName: '', email: '', company: '', subject: '', message: '' }) }}
-                    className="text-sm text-blue-600 hover:underline"
+                    className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 font-semibold px-6 py-3 rounded-xl hover:bg-blue-50 transition-all"
                   >
+                    <Send className="w-4 h-4" />
                     Envoyer un autre message
                   </button>
                 </motion.div>
               ) : (
-                <motion.form key="form" onSubmit={handleSubmit} className="space-y-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <motion.form
+                  key="form"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  onSubmit={handleSubmit}
+                  className="bg-white rounded-3xl border border-gray-100 shadow-xl shadow-gray-200/50 p-6 sm:p-8 space-y-6"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Prénom <span className="text-red-500">*</span></label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        Prénom <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text" required
                         value={formState.firstName}
                         onChange={e => setFormState(s => ({ ...s, firstName: e.target.value }))}
                         placeholder="Seydou"
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       />
                     </div>
                     <div>
@@ -264,20 +328,22 @@ export default function ContactPage() {
                         value={formState.lastName}
                         onChange={e => setFormState(s => ({ ...s, lastName: e.target.value }))}
                         placeholder="Dianka"
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Email <span className="text-red-500">*</span></label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        Email <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="email" required
                         value={formState.email}
                         onChange={e => setFormState(s => ({ ...s, email: e.target.value }))}
                         placeholder="vous@entreprise.com"
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       />
                     </div>
                     <div>
@@ -287,20 +353,22 @@ export default function ContactPage() {
                         value={formState.company}
                         onChange={e => setFormState(s => ({ ...s, company: e.target.value }))}
                         placeholder="Mon Entreprise SAS"
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Sujet <span className="text-red-500">*</span></label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Sujet <span className="text-red-500">*</span>
+                    </label>
                     <select
                       required
                       value={formState.subject}
                       onChange={e => setFormState(s => ({ ...s, subject: e.target.value }))}
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all appearance-none"
+                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all appearance-none"
                     >
-                      <option value="">Choisir un sujet...</option>
+                      <option value="">Choisir un sujet…</option>
                       {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
@@ -316,24 +384,26 @@ export default function ContactPage() {
                       rows={5}
                       value={formState.message}
                       onChange={e => setFormState(s => ({ ...s, message: e.target.value }))}
-                      placeholder="Décrivez votre question ou problème en détail..."
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none"
+                      placeholder="Décrivez votre question ou problème en détail…"
+                      className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none"
                     />
                   </div>
 
                   {error && (
-                    <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>
+                    <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                      {error}
+                    </div>
                   )}
 
                   <button
                     type="submit"
                     disabled={sending}
-                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3.5 px-6 rounded-xl transition-colors shadow-sm"
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 px-6 rounded-xl transition-colors shadow-sm text-sm"
                   >
                     {sending ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Envoi en cours...
+                        Envoi en cours…
                       </>
                     ) : (
                       <>
@@ -352,11 +422,11 @@ export default function ContactPage() {
             </AnimatePresence>
           </div>
 
-          {/* Sidebar info */}
-          <div className="lg:col-span-2 space-y-6">
+          {/* Sidebar */}
+          <div className="lg:col-span-2 space-y-5">
             {/* Address */}
-            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2 text-sm">
                 <Building2 className="w-4 h-4 text-blue-600" /> Siège social
               </h3>
               <div className="space-y-3 text-sm text-gray-600">
@@ -379,31 +449,31 @@ export default function ContactPage() {
             </div>
 
             {/* Hours */}
-            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <Clock className="w-4 h-4 text-blue-600" /> Horaires de support
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2 text-sm">
+                <Clock className="w-4 h-4 text-blue-600" /> Horaires support
               </h3>
               <div className="space-y-2 text-sm">
                 {[
-                  { day: 'Lundi — Vendredi', hours: '9h — 18h (Paris)', available: true },
-                  { day: 'Samedi', hours: '10h — 14h (urgences)', available: true },
-                  { day: 'Dimanche', hours: 'Fermé', available: false },
-                ].map((h) => (
+                  { day: 'Lundi — Vendredi', hours: '9h — 18h', ok: true },
+                  { day: 'Samedi', hours: '10h — 14h (urgences)', ok: true },
+                  { day: 'Dimanche', hours: 'Fermé', ok: false },
+                ].map(h => (
                   <div key={h.day} className="flex items-center justify-between">
-                    <span className="text-gray-600">{h.day}</span>
-                    <span className={cn('font-medium', h.available ? 'text-gray-900' : 'text-gray-400')}>{h.hours}</span>
+                    <span className="text-gray-500">{h.day}</span>
+                    <span className={cn('font-medium text-xs', h.ok ? 'text-gray-800' : 'text-gray-400')}>{h.hours}</span>
                   </div>
                 ))}
               </div>
-              <div className="mt-4 flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl p-3">
+              <div className="mt-4 flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl p-2.5">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                 <span className="text-xs text-green-700 font-medium">Équipe disponible maintenant</span>
               </div>
             </div>
 
             {/* Social */}
-            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-              <h3 className="font-bold text-gray-900 mb-4">Suivez-nous</h3>
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+              <h3 className="font-bold text-gray-900 mb-3 text-sm">Suivez-nous</h3>
               <div className="flex flex-col gap-2">
                 <a href="https://twitter.com" target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-3 p-3 bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-sm transition-all text-sm text-gray-700 hover:text-blue-600">
@@ -421,45 +491,51 @@ export default function ContactPage() {
             </div>
 
             {/* Quick links */}
-            <div className="bg-blue-50 rounded-2xl p-6 border border-blue-100">
-              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <ArrowRight className="w-4 h-4 text-blue-600" /> Liens rapides
-              </h3>
+            <div className="bg-blue-50 rounded-2xl p-5 border border-blue-100">
+              <h3 className="font-bold text-gray-900 mb-3 text-sm">Liens rapides</h3>
               <div className="space-y-2">
                 {[
-                  { label: 'Documentation', href: '#' },
-                  { label: 'FAQ complète', href: '#faq' },
-                  { label: 'Status du service', href: '#' },
-                  { label: 'Signaler une faille de sécurité', href: 'mailto:security@bouba-ia.com' },
-                ].map(link => (
-                  <a key={link.label} href={link.href}
-                    className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-blue-100 text-sm text-gray-700 hover:text-blue-600 hover:border-blue-200 transition-colors group">
-                    <span>{link.label}</span>
-                    <ChevronDown className="w-3.5 h-3.5 -rotate-90 text-gray-300 group-hover:text-blue-600 transition-colors" />
-                  </a>
-                ))}
+                  { label: 'Documentation', href: '#', icon: FileText },
+                  { label: 'FAQ complète', href: '#faq', icon: HelpCircle },
+                  { label: 'Status du service', href: '#', icon: Zap },
+                  { label: 'Signaler une faille', href: 'mailto:security@bouba-ia.com', icon: Shield },
+                ].map(link => {
+                  const Icon = link.icon
+                  return (
+                    <a key={link.label} href={link.href}
+                      className="flex items-center gap-2.5 p-2.5 bg-white rounded-xl border border-blue-100 text-sm text-gray-700 hover:text-blue-600 hover:border-blue-200 transition-colors group">
+                      <Icon className="w-3.5 h-3.5 text-gray-400 group-hover:text-blue-500" />
+                      <span>{link.label}</span>
+                      <ChevronDown className="w-3 h-3 -rotate-90 text-gray-300 ml-auto group-hover:text-blue-400 transition-colors" />
+                    </a>
+                  )
+                })}
               </div>
             </div>
           </div>
         </div>
+        </div>
       </section>
 
-      {/* FAQ */}
-      <section id="faq" className="py-16 px-6 bg-gray-50">
+      {/* ── FAQ ── */}
+      <section id="faq" className="py-16 px-6 bg-gradient-to-br from-slate-50 to-gray-100">
         <div className="max-w-3xl mx-auto">
-          <div className="text-center mb-12">
-            <span className="text-blue-600 font-semibold text-sm uppercase tracking-wider mb-3 block">Questions fréquentes</span>
+          <div className="text-center mb-10">
+            <span className="text-blue-600 font-semibold text-xs uppercase tracking-widest mb-3 block">FAQ</span>
             <h2 className="text-3xl font-bold text-gray-900">Tout ce que vous voulez savoir</h2>
+            <p className="text-gray-500 text-sm mt-2">Les questions les plus fréquentes de nos utilisateurs.</p>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {FAQ.map((item) => (
               <FAQItem key={item.q} q={item.q} a={item.a} />
             ))}
           </div>
           <div className="text-center mt-10">
-            <p className="text-gray-600 text-sm mb-3">Vous n'avez pas trouvé votre réponse ?</p>
-            <a href="mailto:support@bouba-ia.com"
-              className="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-blue-700 transition-colors text-sm">
+            <p className="text-gray-500 text-sm mb-4">Vous n'avez pas trouvé votre réponse ?</p>
+            <a
+              href="mailto:support@bouba-ia.com"
+              className="inline-flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-blue-700 transition-colors text-sm shadow-sm"
+            >
               Contacter le support <Send className="w-4 h-4" />
             </a>
           </div>

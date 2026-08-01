@@ -12,6 +12,8 @@ export const CURRENCY_OPTIONS: { value: Currency; label: string; symbol: string 
 interface PrefsState {
   currency: Currency
   setCurrency: (currency: Currency) => void
+  defaultVatRate: number
+  setDefaultVatRate: (rate: number) => void
 }
 
 export const usePrefsStore = create<PrefsState>()(
@@ -19,6 +21,8 @@ export const usePrefsStore = create<PrefsState>()(
     (set) => ({
       currency: 'EUR',
       setCurrency: (currency) => set({ currency }),
+      defaultVatRate: 20,
+      setDefaultVatRate: (rate) => set({ defaultVatRate: rate }),
     }),
     { name: 'bouba-prefs-v1' }
   )

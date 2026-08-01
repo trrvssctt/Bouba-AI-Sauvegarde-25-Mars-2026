@@ -58,7 +58,7 @@ const labelsList = [
 ]
 
 export default function EmailPage() {
-  const { connections } = useConnections()
+  const { connections, loading: connectionsLoading } = useConnections()
   const gmailConnection = connections?.find(c => c.id === 'gmail')
 
   const {
@@ -99,10 +99,14 @@ export default function EmailPage() {
     if (!boubaInput.trim() || isBoubaRunning) return
     setIsBoubaRunning(true)
     setBoubaResult(null)
-    const result = await sendEmailViaBouba(boubaInput, selectedEmail || undefined)
+    const draft = await draftEmailFromPrompt(boubaInput)
     setIsBoubaRunning(false)
-    setBoubaResult(result.output || result.error || 'Aucune réponse.')
-    if (result.success) setBoubaInput('')
+    if (draft.to) setComposeTo(draft.to)
+    setComposeSubject(draft.subject)
+    setComposeBody(draft.body)
+    setIsComposeOpen(true)
+    setBoubaInput('')
+    setBoubaResult('Brouillon prêt ! Vérifiez et envoyez.')
   }
 
   const [isComposeOpen, setIsComposeOpen] = useState(false)
@@ -272,9 +276,10 @@ export default function EmailPage() {
     if (!aiPrompt.trim()) return
     setIsAiDrafting(true)
     const draft = await draftEmailFromPrompt(aiPrompt)
-    setComposeSubject(draft.subject)
-    setComposeBody(draft.body)
     setIsAiDrafting(false)
+    if (draft.to && !composeTo) setComposeTo(draft.to)
+    if (draft.subject) setComposeSubject(draft.subject)
+    if (draft.body) setComposeBody(draft.body)
     setAiPrompt('')
     toast.success("Brouillon généré par Bouba !")
   }
@@ -305,8 +310,13 @@ export default function EmailPage() {
       return
     }
     setIsSending(true)
-    const result = await sendEmail({ to: composeTo, subject: composeSubject, body: composeBody, attachments: composeAttachments } as any)
+    // Envoi via Bouba (balises [EMAIL_TO]/[EMAIL_SUBJECT]/[EMAIL_BODY_HTML]).
+    // Les pièces jointes passent par l'API Gmail directe (n8n ne les gère pas).
+    const result = composeAttachments.length > 0
+      ? await sendEmail({ to: composeTo, subject: composeSubject, body: composeBody, attachments: composeAttachments } as any)
+      : await sendEmailViaBouba({ to: composeTo, subject: composeSubject, bodyHtml: composeBody })
     setIsSending(false)
+    // Confirmation UNIQUEMENT si success === true — jamais de faux succès
     if (result.success) {
       setIsComposeOpen(false)
       setComposeTo('')
@@ -345,18 +355,108 @@ export default function EmailPage() {
   const isGmailConnected = gmailConnection?.status === 'connected'
   const gmailError = syncError === 'TOKEN_EXPIRED' ? 'TOKEN_EXPIRED' : syncError ? 'SYNC_ERROR' : null
 
+  // Show loading spinner while connections are being fetched
+  if (connectionsLoading || connections === null) {
+    return (
+      <div className="flex h-full items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm">Vérification de la connexion Gmail…</p>
+        </div>
+      </div>
+    )
+  }
+
   // Show empty state if not connected
   if (!isGmailConnected) {
     return (
-      <div className="flex h-full bg-background">
-        <GoogleSyncBanner
-          service="gmail"
-          isConnected={false}
-          isLoading={false}
-          variant="empty"
-          onSync={refreshEmails}
-          onConnect={() => window.location.href = '/settings/connections'}
-        />
+      <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-50 via-red-50/30 to-rose-50/40 p-6 overflow-auto">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -top-32 -left-32 w-96 h-96 bg-red-100/40 rounded-full blur-3xl" />
+          <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-rose-100/40 rounded-full blur-3xl" />
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 32 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="relative w-full max-w-2xl mx-auto text-center space-y-8"
+        >
+          <div className="flex justify-center">
+            <div className="relative">
+              <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-2xl shadow-red-500/30">
+                <Mail className="w-14 h-14 text-white" />
+              </div>
+              <motion.div
+                animate={{ scale: [1, 1.15, 1] }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="absolute -top-2 -right-2 w-9 h-9 bg-amber-500 rounded-full flex items-center justify-center shadow-lg"
+              >
+                <Sparkles className="w-4 h-4 text-white" />
+              </motion.div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h1 className="text-3xl sm:text-4xl font-display font-bold text-gray-900 leading-tight">
+              Votre boîte mail,{' '}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-rose-600">
+                boostée par l'IA
+              </span>
+            </h1>
+            <p className="text-gray-500 text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
+              Connectez Gmail pour lire, rédiger et gérer vos emails intelligemment grâce à Bouba — directement depuis l'app.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+            {[
+              {
+                icon: Bot,
+                color: 'bg-violet-100 text-violet-600',
+                title: 'Rédaction IA',
+                desc: '"Bouba, rédige une réponse professionnelle"',
+              },
+              {
+                icon: Inbox,
+                color: 'bg-red-100 text-red-600',
+                title: 'Boîte unifiée',
+                desc: 'Inbox, envoyés, archives au même endroit',
+              },
+              {
+                icon: Users,
+                color: 'bg-blue-100 text-blue-600',
+                title: 'Auto-complétion',
+                desc: 'Contacts suggérés depuis Google Contacts',
+              },
+            ].map(({ icon: Icon, color, title, desc }) => (
+              <div
+                key={title}
+                className="bg-white/70 backdrop-blur-sm border border-white/80 rounded-2xl p-4 shadow-sm"
+              >
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${color}`}>
+                  <Icon className="w-4 h-4" />
+                </div>
+                <p className="font-semibold text-gray-800 text-sm">{title}</p>
+                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            <button
+              onClick={() => window.location.href = '/settings/connections'}
+              className="inline-flex items-center gap-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold px-8 py-4 rounded-2xl text-base shadow-xl shadow-red-500/25 transition-all hover:scale-105 active:scale-100"
+            >
+              <Mail className="w-5 h-5" />
+              Connecter Gmail
+            </button>
+            <p className="text-xs text-gray-400 flex items-center gap-1.5">
+              <span>🔒</span>
+              Sécurisé via OAuth 2.0 · Révocable à tout moment depuis les paramètres
+            </p>
+          </div>
+        </motion.div>
       </div>
     )
   }
@@ -376,58 +476,79 @@ export default function EmailPage() {
         variant="bar"
       />
       {/* Mobile Bouba bar */}
-      <div className="md:hidden border-b border-border bg-surface/50 px-3 py-2.5 flex-shrink-0">
-        <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-2.5 py-2">
-          <Bot className="w-4 h-4 text-primary shrink-0" />
+      <div className="md:hidden border-b border-gray-200/60 bg-white px-3 py-2 flex-shrink-0">
+        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200/60 rounded-xl px-3 py-1.5 focus-within:border-blue-300 transition-colors">
+          <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center shrink-0">
+            <Sparkles className="w-3 h-3 text-white" />
+          </div>
           <input
             value={boubaInput}
             onChange={e => setBoubaInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleBoubaCommand()}
-            placeholder="Demande à Bouba... (ex: lis mes derniers mails)"
-            className="flex-1 bg-transparent text-sm border-none focus:ring-0 placeholder:text-muted min-w-0"
+            placeholder="Ex: Écris un mail de bonjour à jean@email.com"
+            className="flex-1 bg-transparent text-xs text-gray-700 placeholder:text-gray-400 border-none focus:ring-0 min-w-0 outline-none"
           />
           <button
             onClick={handleBoubaCommand}
             disabled={isBoubaRunning || !boubaInput.trim()}
-            className="p-1.5 bg-primary text-white rounded-lg disabled:opacity-40 hover:bg-primary-dark transition-colors shrink-0"
+            className="w-5 h-5 flex items-center justify-center bg-blue-600 text-white rounded-full disabled:opacity-30 hover:bg-blue-700 transition-colors shrink-0"
           >
-            {isBoubaRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {isBoubaRunning ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Send className="w-2.5 h-2.5" />}
           </button>
         </div>
         {boubaResult && (
-          <div className="text-xs text-secondary bg-primary/5 rounded-lg px-3 py-2 mt-2 leading-relaxed max-h-20 overflow-y-auto">
-            {boubaResult}
+          <div className="text-[10px] text-gray-600 bg-purple-50 border border-purple-100 rounded-lg px-2.5 py-1.5 mt-1.5 leading-relaxed max-h-14 overflow-y-auto italic">
+            "{boubaResult}"
           </div>
         )}
       </div>
 
       <div className="flex flex-1 overflow-hidden min-h-0">
       {/* Email Sidebar */}
-      <div className="hidden md:flex w-56 lg:w-64 border-r border-border flex-col p-4 space-y-4 bg-surface/50">
-        {/* Bouba command bar */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 p-2.5 bg-primary/5 border border-primary/20 rounded-xl">
-            <Bot className="w-4 h-4 text-primary shrink-0" />
-            <input
-              value={boubaInput}
-              onChange={e => setBoubaInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleBoubaCommand()}
-              placeholder="Demande à Bouba..."
-              className="flex-1 bg-transparent text-xs border-none focus:ring-0 placeholder:text-muted"
-            />
-            <button
-              onClick={handleBoubaCommand}
-              disabled={isBoubaRunning || !boubaInput.trim()}
-              className="p-1 bg-primary text-white rounded-lg disabled:opacity-40 hover:bg-primary-dark transition-colors"
-            >
-              {isBoubaRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-          {boubaResult && (
-            <div className="text-[10px] text-secondary bg-primary/5 rounded-lg p-2 leading-relaxed max-h-24 overflow-y-auto">
-              {boubaResult}
+      <div className="hidden md:flex w-52 lg:w-60 border-r border-border flex-col p-3 space-y-3 bg-surface/50">
+        {/* Bouba widget */}
+        <div className="rounded-xl border border-purple-100 bg-gradient-to-b from-purple-50 to-white overflow-hidden">
+          <div className="h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-indigo-500" />
+          <div className="p-2.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center shadow-sm">
+                  <Sparkles className="w-3 h-3 text-white" />
+                </div>
+                <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 border border-white" />
+              </div>
+              <span className="text-[10px] font-black text-gray-700">Bouba</span>
+              {isBoubaRunning && (
+                <div className="flex gap-0.5 items-center ml-auto">
+                  {[0, 0.15, 0.3].map(d => (
+                    <motion.div key={d} animate={{ y: [-1, 1, -1] }} transition={{ repeat: Infinity, duration: 0.5, delay: d }}
+                      className="w-1 h-1 rounded-full bg-purple-400" />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+            <div className="flex items-center gap-1.5 bg-white border border-gray-200/60 rounded-lg px-2 py-1.5 focus-within:border-blue-300 transition-colors">
+              <input
+                value={boubaInput}
+                onChange={e => setBoubaInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleBoubaCommand()}
+                placeholder="Ex: Écris un mail à jean@email.com"
+                className="flex-1 bg-transparent text-[10px] text-gray-700 placeholder:text-gray-400 outline-none min-w-0"
+              />
+              <button
+                onClick={handleBoubaCommand}
+                disabled={isBoubaRunning || !boubaInput.trim()}
+                className="w-4 h-4 flex items-center justify-center bg-blue-600 text-white rounded-full disabled:opacity-30 hover:bg-blue-700 transition-colors shrink-0"
+              >
+                <Send className="w-2.5 h-2.5" />
+              </button>
+            </div>
+            {boubaResult && (
+              <div className="text-[9px] text-gray-600 bg-white border border-purple-100 rounded-lg px-2 py-1.5 leading-relaxed max-h-12 overflow-y-auto italic">
+                "{boubaResult}"
+              </div>
+            )}
+          </div>
         </div>
 
         <button
@@ -1062,7 +1183,7 @@ export default function EmailPage() {
                   type="text"
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="Demandez à Bouba de rédiger... (ex: 'Réponds poliment que je ne suis pas disponible')"
+                  placeholder="Ex: 'Écris un mail de bonjour à seydou.dianka@gmail.com' ou 'Réponds poliment que je ne suis pas disponible'"
                   className="flex-1 bg-transparent border-none focus:ring-0 text-xs italic"
                   onKeyDown={(e) => e.key === 'Enter' && handleAiDraft()}
                 />

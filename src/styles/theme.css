@@ -1,0 +1,238 @@
+/* Theme improvements for Bouba'IA */
+
+/* ===== IMPROVED SHADOWS ===== */
+.shadow-soft {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.shadow-medium {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.shadow-hard {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+/* ===== IMPROVED BORDERS ===== */
+.border-subtle {
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+.border-medium {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+/* ===== IMPROVED CARDS ===== */
+.card {
+  background: white;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.card-interactive {
+  cursor: pointer;
+}
+
+/* ===== IMPROVED BUTTONS ===== */
+.btn-improved {
+  border-radius: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.btn-improved-primary {
+  background: linear-gradient(135deg, #6C3EF4 0%, #8B5CF6 100%);
+  color: white;
+  border: none;
+}
+
+.btn-improved-primary:hover {
+  background: linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(108, 62, 244, 0.3);
+}
+
+.btn-improved-secondary {
+  background: white;
+  color: #4B5563;
+  border: 1px solid #E5E7EB;
+}
+
+.btn-improved-secondary:hover {
+  background: #F9FAFB;
+  border-color: #D1D5DB;
+  transform: translateY(-1px);
+}
+
+/* ===== IMPROVED INPUTS ===== */
+.input-improved {
+  border-radius: 12px;
+  border: 1px solid #E5E7EB;
+  background: white;
+  transition: all 0.2s ease;
+  padding: 12px 16px;
+}
+
+.input-improved:focus {
+  outline: none;
+  border-color: #8B5CF6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+/* ===== GRADIENTS ===== */
+.gradient-primary {
+  background: linear-gradient(135deg, #6C3EF4 0%, #8B5CF6 100%);
+}
+
+.gradient-secondary {
+  background: linear-gradient(135deg, #0F0D1A 0%, #1E1B2E 100%);
+}
+
+.gradient-accent {
+  background: linear-gradient(135deg, #10B981 0%, #34D399 100%);
+}
+
+/* ===== GLASS EFFECT ===== */
+.glass {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.glass-dark {
+  background: rgba(15, 13, 26, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ===== ANIMATIONS ===== */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.float-animation {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ===== MOBILE OPTIMIZATIONS ===== */
+@media (max-width: 768px) {
+  /* Larger touch targets */
+  .mobile-touch {
+    min-height: 48px;
+    min-width: 48px;
+  }
+  
+  /* Better spacing */
+  .mobile-spacing > * + * {
+    margin-top: 16px;
+  }
+  
+  /* Improved cards on mobile */
+  .mobile-card {
+    border-radius: 12px;
+    padding: 16px;
+  }
+  
+  /* Hide non-essential elements */
+  .mobile-hidden {
+    display: none !important;
+  }
+  
+  /* Show mobile-only elements */
+  .mobile-only {
+    display: block !important;
+  }
+}
+
+/* ===== DARK MODE ===== */
+[data-theme="dark"] .card {
+  background: #1A1730;
+  border-color: #2D2B4E;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+
+[data-theme="dark"] .card:hover {
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+[data-theme="dark"] .btn-improved-secondary {
+  background: #221E3D;
+  color: #E2E8F0;
+  border-color: #2D2B4E;
+}
+
+[data-theme="dark"] .btn-improved-secondary:hover {
+  background: #2A2550;
+  border-color: rgba(108,62,244,0.4);
+}
+
+[data-theme="dark"] .input-improved {
+  background: #221E3D;
+  border-color: #2D2B4E;
+  color: #E2E8F0;
+}
+
+[data-theme="dark"] .input-improved:focus {
+  border-color: #8B5CF6;
+  box-shadow: 0 0 0 3px rgba(139,92,246,0.15);
+}
+
+[data-theme="dark"] .glass {
+  background: rgba(26,23,48,0.85);
+  backdrop-filter: blur(10px);
+  border-color: rgba(45,43,78,0.6);
+}
+
+/* ===== UTILITY CLASSES ===== */
+.text-balance {
+  text-wrap: balance;
+}
+
+.smooth-scroll {
+  scroll-behavior: smooth;
+}
+
+.hover-lift {
+  transition: transform 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+/* ===== BOUBA SPECIFIC ===== */
+.bouba-gradient {
+  background: linear-gradient(135deg, 
+    #6C3EF4 0%, 
+    #8B5CF6 25%, 
+    #A78BFA 50%, 
+    #C4B5FD 75%, 
+    #DDD6FE 100%
+  );
+}
+
+.bouba-shadow {
+  box-shadow: 0 8px 32px rgba(108, 62, 244, 0.2);
+}
+
+.bouba-glow {
+  filter: drop-shadow(0 0 8px rgba(108, 62, 244, 0.4));
+}

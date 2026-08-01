@@ -19,49 +19,49 @@ import { usePlans } from '@/src/hooks/usePlans';
 export default function SettingsLayout() {
   const { profile } = useAuth();
   const { hasFeatureAccess } = usePlans();
-  
+
   const settingsNavItems = [
-    { 
-      to: 'profile', 
-      icon: User, 
-      label: 'Profil', 
+    {
+      to: 'profile',
+      icon: User,
+      label: 'Profil',
       description: 'Informations personnelles',
-      available: true // Toujours disponible
+      available: true,
     },
-    { 
-      to: 'connections', 
-      icon: Plug, 
-      label: 'Connexions', 
+    {
+      to: 'connections',
+      icon: Plug,
+      label: 'Connexions',
       description: 'Intégrations tierces',
-      available: hasFeatureAccess('calendar') || hasFeatureAccess('contacts') || hasFeatureAccess('finance') // Pro+
+      available: true,
     },
-    { 
-      to: 'knowledge', 
-      icon: Brain, 
-      label: 'Base de connaissances', 
+    {
+      to: 'knowledge',
+      icon: Brain,
+      label: 'Base de connaissances',
       description: 'Documents et données',
-      available: hasFeatureAccess('knowledge') // Enterprise uniquement
+      available: hasFeatureAccess('knowledge'),
     },
-    { 
-      to: 'plan', 
-      icon: CreditCard, 
-      label: 'Abonnement', 
+    {
+      to: 'plan',
+      icon: CreditCard,
+      label: 'Abonnement',
       description: 'Plan et facturation',
-      available: true // Toujours disponible
+      available: true,
     },
-    { 
-      to: 'notifications', 
-      icon: Bell, 
-      label: 'Notifications', 
+    {
+      to: 'notifications',
+      icon: Bell,
+      label: 'Notifications',
       description: 'Alertes et rappels',
-      available: true // Toujours disponible
+      available: true,
     },
     {
       to: 'branding',
       icon: Palette,
       label: 'Personnalisation',
       description: 'Thèmes et apparence',
-      available: hasFeatureAccess('whitelabel') // Enterprise seulement
+      available: hasFeatureAccess('whitelabel'),
     },
     {
       to: 'support',
@@ -73,132 +73,155 @@ export default function SettingsLayout() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30">
-      {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 lg:px-6 py-4 lg:py-6">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center space-x-3 lg:space-x-6 min-w-0">
-              <Link 
-                to="/dashboard" 
-                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors group"
-              >
-                <ArrowLeft className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
-                <span className="font-medium">Retour au dashboard</span>
-              </Link>
-              <div className="h-6 w-px bg-gray-300" />
-              <motion.h1 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-blue-800 bg-clip-text text-transparent"
-              >
-                Paramètres
-              </motion.h1>
+    <div className="h-screen flex flex-col overflow-hidden bg-background">
+
+      {/* ── Header pleine largeur ────────────────────────────────── */}
+      <header className="shrink-0 bg-surface/95 backdrop-blur-md border-b border-border shadow-sm z-20">
+        <div className="flex items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 py-3 lg:py-4">
+          <div className="flex items-center gap-3 lg:gap-5 min-w-0">
+            <Link
+              to="/dashboard"
+              className="flex items-center gap-2 text-gray-500 hover:text-secondary transition-colors group shrink-0"
+            >
+              <ArrowLeft className="h-4 w-4 group-hover:-translate-x-0.5 transition-transform" />
+              <span className="hidden sm:inline text-sm font-medium">Dashboard</span>
+            </Link>
+            <div className="h-5 w-px bg-gray-200 hidden sm:block shrink-0" />
+            <motion.h1
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-lg lg:text-xl font-bold text-secondary truncate"
+            >
+              Paramètres
+            </motion.h1>
+          </div>
+
+          {/* Chip utilisateur */}
+          <div className="hidden sm:flex items-center gap-2.5 bg-surface hover:bg-gray-100 border border-border rounded-full px-3 py-1.5 transition-colors shrink-0">
+            <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+              {profile?.first_name?.[0] || 'U'}
             </div>
-            
-            {/* User info in header - hidden on small mobile */}
-            <div className="hidden sm:flex items-center space-x-3 bg-white/60 rounded-full px-4 py-2 border border-gray-200/60">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
-                {profile?.first_name?.[0] || 'U'}
-              </div>
-              <div className="text-sm">
-                <p className="font-medium text-gray-900 truncate">
-                  {profile?.first_name ? `${profile.first_name} ${profile.last_name}` : 'Utilisateur'}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {profile?.subscription_status === 'active' ? 'Compte actif' : 'Compte inactif'}
-                </p>
-              </div>
+            <div className="text-xs leading-tight">
+              <p className="font-semibold text-secondary leading-none">
+                {profile?.first_name
+                  ? `${profile.first_name} ${profile.last_name || ''}`.trim()
+                  : 'Utilisateur'}
+              </p>
+              <p className="text-gray-400 mt-0.5 leading-none text-[10px]">
+                {profile?.subscription_status === 'active' ? 'Compte actif' : 'Compte inactif'}
+              </p>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-4 lg:px-6 py-6 lg:py-8">
-        <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
-          {/* Settings Navigation */}
-          <div className="w-full lg:w-72 xl:w-80 flex-shrink-0">
-            <div className="bg-white/60 backdrop-blur-sm rounded-2xl border border-gray-200/60 p-4 lg:p-6 shadow-sm">
-              <h2 className="text-base lg:text-lg font-semibold text-gray-900 mb-4 lg:mb-6">
-                Navigation
-              </h2>
-              <nav className="flex flex-row lg:flex-col gap-2 overflow-x-auto pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0">
-                {settingsNavItems.map((item, index) => {
-                  const IconComponent = item.icon;
-                  
-                  if (!item.available) {
-                    // Item verrouillé
-                    return (
-                      <motion.div
-                        key={item.to + '-locked'}
-                        initial={{ x: -20, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        transition={{ delay: index * 0.1, duration: 0.3 }}
-                        className="relative"
-                      >
-                        <div className="flex items-center space-x-3 px-4 py-4 rounded-xl text-gray-400 cursor-not-allowed opacity-60 border border-gray-200">
-                          <div className="p-2 rounded-lg bg-gray-100">
-                            <IconComponent className="w-5 h-5" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-sm">{item.label}</h3>
-                            <p className="text-xs text-gray-400 truncate">{item.description}</p>
-                          </div>
-                          <Lock className="w-4 h-4" />
-                        </div>
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent to-orange-100/30 rounded-xl pointer-events-none" />
-                      </motion.div>
-                    );
+        {/* ── Navigation mobile horizontale ──────── */}
+        <div className="lg:hidden flex gap-1.5 px-4 pb-3 overflow-x-auto scrollbar-hide">
+          {settingsNavItems.map((item) => {
+            const IconComponent = item.icon;
+            if (!item.available) return null;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 px-3 py-1.5 rounded-full whitespace-nowrap text-xs font-semibold transition-all shrink-0 ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900'
+                  }`
+                }
+              >
+                <IconComponent className="w-3.5 h-3.5" />
+                {item.label}
+              </NavLink>
+            );
+          })}
+        </div>
+      </header>
+
+      {/* ── Corps principal ──────────────────────────────────────── */}
+      <div className="flex flex-1 min-h-0">
+
+        {/* ── Sidebar desktop sticky ───────────────────────────── */}
+        <aside className="hidden lg:flex flex-col w-56 xl:w-64 2xl:w-72 shrink-0 overflow-y-auto border-r border-border bg-surface/80 backdrop-blur-sm">
+          <nav className="p-3 xl:p-4 flex-1 space-y-0.5">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-3 pt-3 pb-2">
+              Navigation
+            </p>
+            {settingsNavItems.map((item) => {
+              const IconComponent = item.icon;
+
+              if (!item.available) {
+                return (
+                  <div
+                    key={item.to + '-locked'}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 opacity-50 cursor-not-allowed select-none"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                      <IconComponent className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold leading-none truncate">{item.label}</p>
+                      <p className="text-[11px] text-gray-400 truncate mt-0.5">{item.description}</p>
+                    </div>
+                    <Lock className="w-3.5 h-3.5 shrink-0" />
+                  </div>
+                );
+              }
+
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 group ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    }`
                   }
-                  
-                  return (
-                    <motion.div
-                      key={item.to}
-                      initial={{ x: -20, opacity: 0 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      transition={{ delay: index * 0.1, duration: 0.3 }}
-                    >
-                      <NavLink
-                        to={item.to}
-                        className={({ isActive }) =>
-                          `flex items-center space-x-3 px-4 py-4 rounded-xl transition-all duration-200 group ${
-                            isActive
-                              ? 'bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 border border-blue-200 shadow-sm'
-                              : 'text-gray-700 hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200'
-                          }`
-                        }
+                >
+                  {({ isActive }: { isActive: boolean }) => (
+                    <>
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                          isActive
+                            ? 'bg-white/20'
+                            : 'bg-gray-100 group-hover:bg-white group-hover:shadow-sm'
+                        }`}
                       >
-                        <div className={`p-2 rounded-lg transition-colors ${
-                          'bg-white shadow-sm group-hover:shadow-md'
-                        }`}>
-                          <IconComponent className="w-5 h-5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-sm">{item.label}</h3>
-                          <p className="text-xs text-gray-500 truncate">{item.description}</p>
-                        </div>
-                      </NavLink>
-                    </motion.div>
-                  );
-                })}
-              </nav>
-            </div>
-          </div>
+                        <IconComponent className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold leading-none truncate">{item.label}</p>
+                        <p
+                          className={`text-[11px] truncate mt-0.5 ${
+                            isActive ? 'text-white/70' : 'text-gray-400'
+                          }`}
+                        >
+                          {item.description}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </NavLink>
+              );
+            })}
+          </nav>
+        </aside>
 
-          {/* Settings Content */}
-          <div className="flex-1 min-w-0">
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
+        {/* ── Contenu principal scrollable ─────────────────────── */}
+        <main className="flex-1 min-w-0 overflow-y-auto bg-background">
+          <div className="p-4 sm:p-6 lg:p-8 xl:p-10 w-full">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, duration: 0.4 }}
-              className="bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden"
+              transition={{ duration: 0.25 }}
             >
-              <div className="p-4 lg:p-8">
-                <Outlet />
-              </div>
+              <Outlet />
             </motion.div>
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );

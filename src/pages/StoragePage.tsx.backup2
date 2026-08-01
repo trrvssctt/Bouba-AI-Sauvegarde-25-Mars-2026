@@ -1,0 +1,703 @@
+import { useState, useEffect } from 'react'
+import { motion } from 'motion/react'
+import { 
+  Folder, 
+  File, 
+  Image, 
+  Video, 
+  Music, 
+  Archive, 
+  Download, 
+  Upload, 
+  Share2, 
+  Star, 
+  MoreVertical,
+  Search,
+  Filter,
+  Grid,
+  List,
+  Clock,
+  Users,
+  HardDrive,
+  Cloud,
+  Trash2,
+  Eye,
+  Copy,
+  Move,
+  FolderPlus,
+  FilePlus,
+  Zap,
+  BarChart3,
+  Shield,
+  Lock,
+  Globe
+} from 'lucide-react'
+import { cn } from '@/src/lib/utils'
+import { useAuth } from '@/src/hooks/useAuth'
+import { usePlans } from '@/src/hooks/usePlans'
+import LockedFeaturePage from './LockedFeaturePage'
+
+interface StorageFile {
+  id: string
+  name: string
+  type: 'folder' | 'document' | 'image' | 'video' | 'audio' | 'archive' | 'other'
+  size: string
+  modified: string
+  owner: string
+  starred: boolean
+  shared: boolean
+  path: string
+}
+
+interface StorageService {
+  id: string
+  name: string
+  icon: React.ReactNode
+  color: string
+  used: number
+  total: number
+  files: number
+  folders: number
+}
+
+export default function StoragePage() {
+  const { profile } = useAuth()
+  const { hasFeatureAccess } = usePlans()
+  const [files, setFiles] = useState<StorageFile[]>([])
+  const [services, setServices] = useState<StorageService[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
+  const [selectedType, setSelectedType] = useState<string>('all')
+  const [selectedService, setSelectedService] = useState<string>('all')
+  
+  // Vérifier l'accès au plan
+  const [checkingAccess, setCheckingAccess] = useState(true)
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null)
+  
+  // Vérifier l'accès au plan - dans un useEffect
+  useEffect(() => {
+    if (hasAccess !== true) return // Ne pas charger si pas d'accès
+    // Toujours exécuter, même si hasFeatureAccess est undefined
+    const access = hasFeatureAccess ? hasFeatureAccess('calendar') : false
+    setHasAccess(access)
+    setCheckingAccess(false)
+  }, [profile, hasFeatureAccess])
+    return (
+      <LockedFeaturePage
+        featureName="Stockage Cloud (Dropbox/Drive)"
+        featureDescription="Gérez, synchronisez et partagez vos fichiers entre Dropbox, Google Drive, OneDrive et autres services de stockage cloud."
+        requiredPlan="premium"
+        currentPlan={profile?.plan_id}
+        icon={<Folder className="w-12 h-12" />}
+      />
+    )
+  }
+  
+  // Simuler le chargement des données
+  useEffect(() => {
+    if (hasAccess !== true) return // Ne pas charger si pas d'accès
+    const loadData = async () => {
+      setLoading(true)
+      try {
+        // Simuler un appel API
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        
+        // Données de test
+        const mockFiles: StorageFile[] = [
+          {
+            id: '1',
+            name: 'Documents',
+            type: 'folder',
+            size: '2.4 GB',
+            modified: '2026-04-14',
+            owner: 'Vous',
+            starred: true,
+            shared: false,
+            path: '/Documents'
+          },
+          {
+            id: '2',
+            name: 'Présentation Q2.pdf',
+            type: 'document',
+            size: '4.2 MB',
+            modified: '2026-04-13',
+            owner: 'Marie Dubois',
+            starred: true,
+            shared: true,
+            path: '/Documents/Présentations'
+          },
+          {
+            id: '3',
+            name: 'Photo équipe.jpg',
+            type: 'image',
+            size: '8.7 MB',
+            modified: '2026-04-12',
+            owner: 'Jean Martin',
+            starred: false,
+            shared: true,
+            path: '/Images'
+          },
+          {
+            id: '4',
+            name: 'Démo produit.mp4',
+            type: 'video',
+            size: '156 MB',
+            modified: '2026-04-11',
+            owner: 'Vous',
+            starred: false,
+            shared: false,
+            path: '/Vidéos'
+          },
+          {
+            id: '5',
+            name: 'Backup database.zip',
+            type: 'archive',
+            size: '1.2 GB',
+            modified: '2026-04-10',
+            owner: 'Système',
+            starred: false,
+            shared: false,
+            path: '/Backups'
+          },
+          {
+            id: '6',
+            name: 'Musique de travail',
+            type: 'audio',
+            size: '845 MB',
+            modified: '2026-04-09',
+            owner: 'Vous',
+            starred: true,
+            shared: false,
+            path: '/Musique'
+          },
+          {
+            id: '7',
+            name: 'Rapport financier.xlsx',
+            type: 'document',
+            size: '3.1 MB',
+            modified: '2026-04-08',
+            owner: 'Sophie Bernard',
+            starred: false,
+            shared: true,
+            path: '/Documents/Finances'
+          },
+          {
+            id: '8',
+            name: 'Design système.fig',
+            type: 'document',
+            size: '12.4 MB',
+            modified: '2026-04-07',
+            owner: 'Thomas Leroy',
+            starred: true,
+            shared: true,
+            path: '/Design'
+          }
+        ]
+        
+        const mockServices: StorageService[] = [
+          {
+            id: 'google',
+            name: 'Google Drive',
+            icon: <Cloud className="w-5 h-5" />,
+            color: '#4285F4',
+            used: 15.2,
+            total: 100,
+            files: 1245,
+            folders: 87
+          },
+          {
+            id: 'dropbox',
+            name: 'Dropbox',
+            icon: <HardDrive className="w-5 h-5" />,
+            color: '#0061FF',
+            used: 8.7,
+            total: 50,
+            files: 876,
+            folders: 42
+          },
+          {
+            id: 'onedrive',
+            name: 'OneDrive',
+            icon: <Cloud className="w-5 h-5" />,
+            color: '#0078D4',
+            used: 23.4,
+            total: 1000,
+            files: 2103,
+            folders: 156
+          },
+          {
+            id: 'icloud',
+            name: 'iCloud',
+            icon: <Cloud className="w-5 h-5" />,
+            color: '#5AC8FA',
+            used: 4.8,
+            total: 50,
+            files: 543,
+            folders: 31
+          }
+        ]
+        
+        setFiles(mockFiles)
+        setServices(mockServices)
+      } catch (error) {
+        console.error('Error loading storage data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadData()
+  }, [])
+  
+  // Filtrer les fichiers
+  const filteredFiles = files.filter(file => {
+    const matchesSearch = file.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         file.path.toLowerCase().includes(searchQuery.toLowerCase())
+    
+    const matchesType = selectedType === 'all' || file.type === selectedType
+    const matchesService = selectedService === 'all' || true // Pour l'instant, tous les services
+    
+    return matchesSearch && matchesType && matchesService
+  })
+  
+  // Obtenir l'icône du fichier
+  const getFileIcon = (type: StorageFile['type']) => {
+    switch (type) {
+      case 'folder': return '📁'
+      case 'document': return '📄'
+      case 'image': return '🖼️'
+      case 'video': return '🎥'
+      case 'audio': return '🎵'
+      case 'archive': return '📦'
+      default: return '📎'
+    }
+  }
+  
+  // Obtenir la couleur du type
+  const getTypeColor = (type: StorageFile['type']) => {
+    switch (type) {
+      case 'folder': return 'bg-blue-100 text-blue-800'
+      case 'document': return 'bg-green-100 text-green-800'
+      case 'image': return 'bg-purple-100 text-purple-800'
+      case 'video': return 'bg-red-100 text-red-800'
+      case 'audio': return 'bg-yellow-100 text-yellow-800'
+      case 'archive': return 'bg-gray-100 text-gray-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+  
+  // Rendu conditionnel
+  if (checkingAccess) {
+  // Rendu conditionnel
+  if (checkingAccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+  
+  if (hasAccess === false) {
+    return (
+      <LockedFeaturePage
+        featureName="Stockage Cloud (Dropbox/Drive)"
+        featureDescription="Stockez, synchronisez et partagez vos fichiers dans le cloud avec Dropbox et Google Drive."
+        requiredPlan="premium"
+        currentPlan={profile?.plan_id}
+        icon={<Folder className="w-12 h-12" />}
+      />
+    )
+  }
+  
+  
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+  
+  if (hasAccess === false) {
+    return (
+      <LockedFeaturePage
+        featureName="Stockage Cloud (Dropbox/Drive)"
+        featureDescription="Stockez, synchronisez et partagez vos fichiers dans le cloud avec Dropbox et Google Drive."
+        requiredPlan="premium"
+        currentPlan={profile?.plan_id}
+        icon={<Folder className="w-12 h-12" />}
+      />
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-background to-gray-50 p-4 md:p-6">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mb-8"
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-3xl font-display font-bold text-secondary mb-2">
+              <Folder className="inline-block w-8 h-8 mr-3 text-primary" />
+              Stockage Cloud
+            </h1>
+            <p className="text-muted">
+              Gérez vos fichiers sur Google Drive, Dropbox, OneDrive et iCloud
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            <button className="btn-secondary flex items-center gap-2">
+              <Upload className="w-4 h-4" />
+              Téléverser
+            </button>
+            <button className="btn-primary flex items-center gap-2">
+              <FolderPlus className="w-4 h-4" />
+              Nouveau dossier
+            </button>
+          </div>
+        </div>
+        
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="glass-card p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted">Espace utilisé</p>
+                <p className="text-2xl font-bold text-secondary">51.8 GB</p>
+              </div>
+              <HardDrive className="w-8 h-8 text-primary/30" />
+            </div>
+          </div>
+          
+          <div className="glass-card p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted">Fichiers</p>
+                <p className="text-2xl font-bold text-secondary">4,767</p>
+              </div>
+              <File className="w-8 h-8 text-blue-500/30" />
+            </div>
+          </div>
+          
+          <div className="glass-card p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted">Dossiers</p>
+                <p className="text-2xl font-bold text-secondary">316</p>
+              </div>
+              <Folder className="w-8 h-8 text-green-500/30" />
+            </div>
+          </div>
+          
+          <div className="glass-card p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted">Partagés</p>
+                <p className="text-2xl font-bold text-secondary">187</p>
+              </div>
+              <Share2 className="w-8 h-8 text-purple-500/30" />
+            </div>
+          </div>
+        </div>
+      </motion.div>
+      
+      {/* Main Content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column - Services */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="lg:col-span-1"
+        >
+          <div className="glass-card p-6 mb-6">
+            <h2 className="text-xl font-display font-bold text-secondary mb-4">Services connectés</h2>
+            
+            <div className="space-y-4">
+              {services.map(service => (
+                <div
+                  key={service.id}
+                  className="p-4 rounded-xl border hover:border-primary/30 transition-colors cursor-pointer group"
+                  style={{ borderLeftColor: service.color, borderLeftWidth: '4px' }}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div 
+                        className="w-10 h-10 rounded-lg flex items-center justify-center"
+                        style={{ backgroundColor: `${service.color}20` }}
+                      >
+                        <div style={{ color: service.color }}>
+                          {service.icon}
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="font-display font-bold text-secondary group-hover:text-primary">
+                          {service.name}
+                        </h3>
+                        <p className="text-sm text-muted">
+                          {service.files} fichiers • {service.folders} dossiers
+                        </p>
+                      </div>
+                    </div>
+                    <MoreVertical className="w-5 h-5 text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                  
+                  {/* Usage bar */}
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="text-muted">Utilisation</span>
+                      <span className="font-medium">
+                        {service.used} GB / {service.total} GB
+                      </span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full rounded-full"
+                        style={{ 
+                          width: `${(service.used / service.total) * 100}%`,
+                          backgroundColor: service.color
+                        }}
+                      />
+                    </div>
+                    <div className="text-xs text-muted mt-1 text-right">
+                      {((service.used / service.total) * 100).toFixed(1)}% utilisé
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <button className="w-full mt-4 p-3 border-2 border-dashed border-gray-300 rounded-xl text-muted hover:text-primary hover:border-primary/50 transition-colors flex items-center justify-center gap-2">
+              <Cloud className="w-4 h-4" />
+              Ajouter un service
+            </button>
+          </div>
+          
+          {/* Filters */}
+          <div className="glass-card p-6">
+            <h2 className="text-xl font-display font-bold text-secondary mb-4">Filtres</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-secondary mb-2">Type de fichier</label>
+                <div className="flex flex-wrap gap-2">
+                  {['all', 'folder', 'document', 'image', 'video', 'audio', 'archive'].map(type => (
+                    <button
+                      key={type}
+                      onClick={() => setSelectedType(type)}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-sm transition-colors',
+                        selectedType === type
+                          ? getTypeColor(type as StorageFile['type'])
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      )}
+                    >
+                      {type === 'all' ? 'Tous' : 
+                       type === 'folder' ? 'Dossiers' :
+                       type === 'document' ? 'Documents' :
+                       type === 'image' ? 'Images' :
+                       type === 'video' ? 'Vidéos' :
+                       type === 'audio' ? 'Audio' : 'Archives'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-secondary mb-2">Affichage</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className={cn(
+                      'flex-1 p-2 rounded-lg flex items-center justify-center gap-2 transition-colors',
+                      viewMode === 'grid'
+                        ? 'bg-primary text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    )}
+                  >
+                    <Grid className="w-4 h-4" />
+                    Grille
+                  </button>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={cn(
+                      'flex-1 p-2 rounded-lg flex items-center justify-center gap-2 transition-colors',
+                      viewMode === 'list'
+                        ? 'bg-primary text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    )}
+                  >
+                    <List className="w-4 h-4" />
+                    Liste
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+        
+        {/* Right Column - Files */}
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="lg:col-span-2"
+        >
+          <div className="glass-card p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <h2 className="text-xl font-display font-bold text-secondary">Fichiers</h2>
+              
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1 md:w-64">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Rechercher des fichiers..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                </div>
+                
+                <button className="btn-secondary flex items-center gap-2">
+                  <Filter className="w-4 h-4" />
+                  Filtres
+                </button>
+              </div>
+            </div>
+            
+            {/* Files Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-muted uppercase">Nom</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-muted uppercase">Type</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-muted uppercase">Taille</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-muted uppercase">Modifié</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-muted uppercase">Propriétaire</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-muted uppercase">Favori</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-muted uppercase"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFiles.map((file) => (
+                    <tr key={file.id} className="border-b border-border/50 hover:bg-surface/50">
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl">{getFileIcon(file.type)}</span>
+                          <span className="font-medium text-secondary">{file.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface text-xs font-medium uppercase">
+                          {file.type}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm">{file.size}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5 text-muted" />
+                          <span className="text-sm">{new Date(file.modified).toLocaleDateString('fr-FR')}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold">
+                            {file.owner.charAt(0)}
+                          </div>
+                          <span className="text-sm">{file.owner}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        {file.starred ? (
+                          <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                        ) : (
+                          <Star className="w-4 h-4 text-muted" />
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <button className="p-1 hover:bg-gray-100 rounded transition-colors">
+                            <Eye className="w-4 h-4 text-muted" />
+                          </button>
+                          <button className="p-1 hover:bg-gray-100 rounded transition-colors">
+                            <Download className="w-4 h-4 text-muted" />
+                          </button>
+                          <button className="p-1 hover:bg-gray-100 rounded transition-colors">
+                            <MoreVertical className="w-4 h-4 text-muted" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            {filteredFiles.length === 0 && (
+              <div className="text-center py-12">
+                <Folder className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-secondary mb-2">Aucun fichier trouvé</h3>
+                <p className="text-muted">Essayez de modifier vos filtres de recherche</p>
+              </div>
+            )}
+          </div>
+          
+          {/* AI Assistant Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            className="glass-card p-6 bg-gradient-to-br from-primary/5 to-secondary/5 border-primary/20 mt-6"
+          >
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Zap className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-secondary">Assistant IA Stockage</h3>
+                <p className="text-sm text-muted">Exclusif Plan Premium : analyse de duplication et optimisation d'espace</p>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 bg-white/50 rounded-xl border">
+                <div className="flex items-center gap-2 mb-2">
+                  <BarChart3 className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-medium text-secondary">Duplication détectée</span>
+                </div>
+                <p className="text-xs text-muted">124 fichiers en double (2.3 GB)</p>
+              </div>
+              
+              <div className="p-4 bg-white/50 rounded-xl border">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-medium text-secondary">Sécurité</span>
+                </div>
+                <p className="text-xs text-muted">8 fichiers sensibles non chiffrés</p>
+              </div>
+              
+              <div className="p-4 bg-white/50 rounded-xl border">
+                <div className="flex items-center gap-2 mb-2">
+                  <Globe className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-medium text-secondary">Partage</span>
+                </div>
+                <p className="text-xs text-muted">43 fichiers partagés publiquement</p>
+              </div>
+            </div>
+            
+            <button className="w-full mt-4 btn-primary flex items-center justify-center gap-2">
+              <Zap className="w-4 h-4" />
+              Lancer l'optimisation IA
+            </button>
+          </motion.div>
+        </motion.div>
+      </div>
+    </div>
+  )
+}

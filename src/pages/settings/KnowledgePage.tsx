@@ -2,11 +2,10 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   Upload, FileText, Trash2, Search, Sparkles, Database,
-  Lock, CheckCircle2, AlertCircle, Loader2, Send, X, HardDrive
+  CheckCircle2, AlertCircle, Loader2, Send, X, HardDrive
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/src/lib/utils'
-import { usePlans } from '@/src/hooks/usePlans'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -46,15 +45,12 @@ function getFileIcon(name: string) {
 }
 
 const authHeader = () => ({
-  Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+  Authorization: `Bearer ${localStorage.getItem('bouba_auth_token')}`,
 })
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function KnowledgePage() {
-  const { hasFeatureAccess } = usePlans()
-  const hasRAGAccess = hasFeatureAccess('knowledge')
-
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [documents, setDocuments] = useState<Doc[]>([])
@@ -77,7 +73,7 @@ export default function KnowledgePage() {
       const res = await fetch('/api/knowledge/documents', { headers: authHeader() })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setDocuments(Array.isArray(data) ? data : data.documents ?? [])
+      setDocuments(Array.isArray(data) ? data : (data.data ?? data.documents ?? []))
     } catch (err: any) {
       toast.error('Impossible de charger les documents')
     } finally {
@@ -86,8 +82,8 @@ export default function KnowledgePage() {
   }, [])
 
   useEffect(() => {
-    if (hasRAGAccess) loadDocuments()
-  }, [hasRAGAccess, loadDocuments])
+    loadDocuments()
+  }, [loadDocuments])
 
   // ── Upload ────────────────────────────────────────────────────────────
 
@@ -107,15 +103,14 @@ export default function KnowledgePage() {
       const entryIndex = uploadingFiles.length + i
 
       try {
-        // Simulate progressive progress via XHR so we can track upload %
-        await new Promise<void>((resolve, reject) => {
+        const warning = await new Promise<string | null>((resolve, reject) => {
           const xhr = new XMLHttpRequest()
           const formData = new FormData()
           formData.append('file', file)
 
           xhr.upload.addEventListener('progress', e => {
             if (e.lengthComputable) {
-              const pct = Math.round((e.loaded / e.total) * 90) // up to 90% for upload
+              const pct = Math.round((e.loaded / e.total) * 90)
               setUploadingFiles(prev =>
                 prev.map((uf, idx) => (idx === entryIndex ? { ...uf, progress: pct } : uf))
               )
@@ -129,27 +124,38 @@ export default function KnowledgePage() {
                   idx === entryIndex ? { ...uf, progress: 100, done: true } : uf
                 )
               )
-              resolve()
+              try {
+                const json = JSON.parse(xhr.responseText)
+                resolve(json.warning ?? null)
+              } catch {
+                resolve(null)
+              }
             } else {
-              reject(new Error(`Upload failed: ${xhr.status}`))
+              let errorMsg = `Erreur ${xhr.status}`
+              try { errorMsg = JSON.parse(xhr.responseText)?.error || errorMsg } catch {}
+              reject(new Error(errorMsg))
             }
           })
 
-          xhr.addEventListener('error', () => reject(new Error('Network error')))
+          xhr.addEventListener('error', () => reject(new Error('Erreur réseau')))
 
           xhr.open('POST', '/api/knowledge/upload')
-          xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('auth_token')}`)
+          xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('bouba_auth_token')}`)
           xhr.send(formData)
         })
 
-        toast.success(`${file.name} importé avec succès`)
+        if (warning) {
+          toast.warning(`${file.name} enregistré — ${warning}`)
+        } else {
+          toast.success(`${file.name} indexé avec succès`)
+        }
       } catch (err: any) {
         setUploadingFiles(prev =>
           prev.map((uf, idx) =>
             idx === entryIndex ? { ...uf, error: true, done: true } : uf
           )
         )
-        toast.error(`Erreur lors de l'import de ${file.name}`)
+        toast.error(`${file.name} : ${(err as any)?.message || 'Erreur lors de l\'import'}`)
       }
     }
 
@@ -172,10 +178,10 @@ export default function KnowledgePage() {
     e.preventDefault()
     setIsDragging(false)
     const files = Array.from(e.dataTransfer.files).filter(f =>
-      /\.(pdf|docx|txt|csv)$/i.test(f.name)
+      /\.(pdf|docx|txt|csv|xlsx|xls)$/i.test(f.name)
     )
     if (files.length === 0) {
-      toast.error('Formats acceptés : PDF, DOCX, TXT, CSV')
+      toast.error('Formats acceptés : PDF, Excel, CSV, TXT')
       return
     }
     uploadFiles(files)
@@ -242,47 +248,12 @@ export default function KnowledgePage() {
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="space-y-1">
         <h2 className="text-2xl font-display font-bold text-secondary">Base de connaissance</h2>
-        <p className="text-muted text-sm">Donnez de la mémoire à Bouba en important vos documents.</p>
-
-        {/* Plan lock banner */}
-        {!hasRAGAccess && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-4 flex items-start gap-3 bg-orange-50 border border-orange-200 rounded-2xl p-4"
-          >
-            <Lock className="w-5 h-5 text-orange-600 mt-0.5 shrink-0" />
-            <div>
-              <h3 className="font-semibold text-orange-800">Fonctionnalité Enterprise requise</h3>
-              <p className="text-sm text-orange-700 mt-0.5">
-                La base de connaissances avec RAG / Vector Store est réservée au plan Enterprise.{' '}
-                <a href="/settings/plan" className="font-semibold underline">
-                  Découvrir les plans
-                </a>
-              </p>
-            </div>
-          </motion.div>
-        )}
+        <p className="text-muted text-sm">
+          Importez vos catalogues, tarifs ou guides — Bouba les utilisera automatiquement dans ses réponses.
+        </p>
       </motion.div>
 
-      {/* ── Locked state ─────────────────────────────────────────────── */}
-      {!hasRAGAccess ? (
-        <div className="text-center py-20 space-y-6 opacity-60">
-          <div className="w-20 h-20 bg-background rounded-3xl flex items-center justify-center mx-auto">
-            <Database className="w-10 h-10 text-muted" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-xl font-display font-bold text-secondary">Base de connaissances verrouillée</h3>
-            <p className="text-muted max-w-md mx-auto text-sm">
-              Importez vos documents et créez une base de connaissances personnalisée avec le plan <strong>Enterprise</strong>.
-            </p>
-          </div>
-          <button onClick={() => (window.location.href = '/settings/plan')} className="btn-primary py-3 px-8">
-            Mettre à niveau maintenant
-          </button>
-        </div>
-      ) : (
-        <>
+      <>
           {/* ── Stats strip ─────────────────────────────────────────────── */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}
@@ -334,7 +305,7 @@ export default function KnowledgePage() {
               </div>
               <div className="space-y-1">
                 <h3 className="font-display font-bold text-secondary">Glissez vos fichiers ici</h3>
-                <p className="text-xs text-muted">PDF, DOCX, TXT, CSV — jusqu'à 10 MB par fichier</p>
+                <p className="text-xs text-muted">PDF, Excel (.xlsx), CSV, TXT — jusqu'à 15 MB par fichier</p>
               </div>
               <div
                 className="btn-primary w-full py-2 text-sm pointer-events-auto"
@@ -346,7 +317,7 @@ export default function KnowledgePage() {
             <input
               type="file"
               ref={fileInputRef}
-              accept=".pdf,.docx,.txt,.csv"
+              accept=".pdf,.docx,.txt,.csv,.xlsx,.xls"
               multiple
               onChange={handleFileChange}
               className="hidden"
@@ -414,7 +385,7 @@ export default function KnowledgePage() {
                   </p>
                   {!search && (
                     <p className="text-xs text-muted max-w-xs">
-                      Importez vos PDF, DOCX ou fichiers texte pour construire la mémoire de Bouba.
+                      Importez votre catalogue produits (CSV/Excel), vos tarifs ou guides PDF — Bouba les consultera lors de vos conversations.
                     </p>
                   )}
                 </div>
@@ -576,17 +547,20 @@ export default function KnowledgePage() {
             <div className="relative z-10 space-y-3 max-w-lg">
               <div className="flex items-center gap-2 text-primary-light">
                 <Sparkles className="w-5 h-5" />
-                <span className="text-xs font-bold uppercase tracking-widest">Astuce Bouba</span>
+                <span className="text-xs font-bold uppercase tracking-widest">Exemples d'utilisation</span>
               </div>
-              <h3 className="text-xl font-display font-bold">Posez des questions sur vos documents</h3>
-              <p className="text-sm text-white/70 leading-relaxed">
-                Une fois vos documents indexés, demandez à Bouba :
-                « Que dit le guide interne sur les congés ? » ou « Résume-moi la stratégie Q1 ».
+              <h3 className="text-xl font-display font-bold">Bouba connaît votre catalogue</h3>
+              <ul className="text-sm text-white/70 leading-relaxed space-y-1 list-disc list-inside">
+                <li>« Je viens de vendre un <strong className="text-white">ordinateur Dell XPS</strong> à Jean Martin, génère le reçu »</li>
+                <li>« Quel est le prix de notre <strong className="text-white">forfait Pro</strong> ? »</li>
+                <li>« Liste tous nos produits avec une marge supérieure à 30% »</li>
+              </ul>
+              <p className="text-xs text-white/50 mt-2">
+                Importez un fichier CSV ou Excel avec vos produits (nom, prix, description, référence…).
               </p>
             </div>
           </div>
         </>
-      )}
     </div>
   )
 }

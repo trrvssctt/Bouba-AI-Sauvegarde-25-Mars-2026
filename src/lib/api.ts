@@ -1,7 +1,8 @@
 // Wrapper API qui remplace le client Supabase par des appels REST
 // Compatible avec les hooks existants pour faciliter la migration
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
+// ?? au lieu de || pour que VITE_API_URL='' (vide) soit respecté (chaîne vide = falsy avec ||)
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 
 // Types de base
 interface User {
@@ -38,24 +39,54 @@ export async function apiCall<T = any>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
+    // Récupérer le token d'authentification depuis localStorage
+    const getAuthToken = () => {
+      if (typeof window !== 'undefined') {
+        return localStorage.getItem('bouba_auth_token');
+      }
+      return null;
+    };
+    
+    const token = getAuthToken();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+    
+    // Ajouter le token d'authentification si disponible
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       credentials: 'include', // Pour envoyer les cookies
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
     })
 
     const data = await response.json()
 
     if (!response.ok) {
-      return { success: false, error: data.error || `HTTP ${response.status}` }
+      // Préserver code et redirectTo (ex: QUOTA_EXHAUSTED, SUBSCRIPTION_INACTIVE au login)
+      return {
+        success: false,
+        error: data.error || `HTTP ${response.status}`,
+        ...(data.code ? { code: data.code } : {}),
+        ...(data.redirectTo ? { redirectTo: data.redirectTo } : {}),
+      } as ApiResponse<T>
     }
 
     // Si l'API retourne une structure {success: true, data: ...}, on retourne directement data
+    // mais on préserve aussi les autres propriétés comme userPlan
     if (data.success && data.data !== undefined) {
-      return { success: true, data: data.data }
+      const result: any = { success: true, data: data.data }
+      // Copier toutes les autres propriétés (userPlan, etc.)
+      Object.keys(data).forEach(key => {
+        if (key !== 'success' && key !== 'data') {
+          result[key] = data[key]
+        }
+      })
+      return result
     }
 
     return { success: true, data }
@@ -83,7 +114,7 @@ export const auth = {
       }
     }
   }) => {
-    const result = await apiCall<{ user: User }>('/auth/signup', {
+    const result = await apiCall<{ user: User }>('/api/auth/signup', {
       method: 'POST',
       body: JSON.stringify({
         email: params.email,
@@ -102,7 +133,7 @@ export const auth = {
 
   // Connexion avec email/mot de passe
   signInWithPassword: async (params: { email: string; password: string }) => {
-    const result = await apiCall<{ user: User }>('/auth/login', {
+    const result = await apiCall<{ user: User }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(params),
     })
@@ -115,7 +146,7 @@ export const auth = {
 
   // Déconnexion
   signOut: async () => {
-    const result = await apiCall('/auth/logout', {
+    const result = await apiCall('/api/auth/logout', {
       method: 'POST',
     })
 
@@ -126,7 +157,7 @@ export const auth = {
 
   // Récupérer la session courante
   getSession: async () => {
-    const result = await apiCall<{ user: User }>('/auth/me')
+    const result = await apiCall<{ user: User }>('/api/auth/me')
 
     return {
       data: {
@@ -141,7 +172,7 @@ export const auth = {
 
   // Récupérer l'utilisateur courant
   getUser: async () => {
-    const result = await apiCall<{ user: User }>('/auth/me')
+    const result = await apiCall<{ user: User }>('/api/auth/me')
 
     return {
       data: {
@@ -223,7 +254,7 @@ class SupabaseQueryBuilder<T> {
   async single() {
     // Construire la query et faire l'appel API
     const queryParams = this.buildQueryParams()
-    const result = await apiCall<T[]>(`/data/${this.table}?${queryParams.toString()}&limit=1`)
+    const result = await apiCall<T[]>(`/api/data/${this.table}?${queryParams.toString()}&limit=1`)
     
     if (!result.success) {
       return { data: null, error: { message: result.error } }
@@ -236,7 +267,7 @@ class SupabaseQueryBuilder<T> {
   async then(resolve?: (value: { data: T[] | null; error: any }) => any) {
     // Pour supporter les promesses
     const queryParams = this.buildQueryParams()
-    const result = await apiCall<T[]>(`/data/${this.table}?${queryParams.toString()}`)
+    const result = await apiCall<T[]>(`/api/data/${this.table}?${queryParams.toString()}`)
     
     const response = {
       data: result.success ? result.data : null,
@@ -277,7 +308,7 @@ export const supabase = {
     select: (fields: string = '*') => new SupabaseQueryBuilder<T>(table, fields),
 
     insert: async (data: any | any[]) => {
-      const result = await apiCall<T>(`/data/${table}`, {
+      const result = await apiCall<T>(`/api/data/${table}`, {
         method: 'POST',
         body: JSON.stringify({ data }),
       })
@@ -299,7 +330,7 @@ export const supabase = {
     },
 
     upsert: async (data: any | any[]) => {
-      const result = await apiCall<T>(`/data/${table}/upsert`, {
+      const result = await apiCall<T>(`/api/data/${table}/upsert`, {
         method: 'POST',
         body: JSON.stringify({ data }),
       })
@@ -312,7 +343,7 @@ export const supabase = {
 
     delete: () => ({
       eq: async (field: string, value: any) => {
-        const result = await apiCall(`/data/${table}`, {
+        const result = await apiCall(`/api/data/${table}`, {
           method: 'DELETE',
           body: JSON.stringify({ where: { [field]: value } }),
         })

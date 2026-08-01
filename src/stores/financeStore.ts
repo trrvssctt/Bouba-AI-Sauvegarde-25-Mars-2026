@@ -38,6 +38,7 @@ interface FinanceState {
   deleteTransaction: (id: string) => Promise<void>
   setGoal: (goal: FinancialGoal) => Promise<void>
   addCategory: (category: string) => void
+  removeCategory: (category: string) => void
 
   getMonthlyStats: (month: number, year: number) => {
     income: number
@@ -161,6 +162,10 @@ export const useFinanceStore = create<FinanceState>()(
 
       addCategory: (category) => set((state) => ({
         categories: [...new Set([...state.categories, category])]
+      })),
+
+      removeCategory: (category) => set((state) => ({
+        categories: state.categories.filter(c => c !== category)
       })),
 
       getMonthlyStats: (month, year) => {

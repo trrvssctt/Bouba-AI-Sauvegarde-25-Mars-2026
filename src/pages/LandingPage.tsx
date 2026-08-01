@@ -110,61 +110,6 @@ function LandingAvatar() {
   )
 }
 
-// ── Interactive animation picker (added to "How it works" section) ──────────
-
-function AnimationShowcase() {
-  const { animation, play } = useAvatarAnimation('idle')
-  const [active, setActive] = useState<AvatarAnimation>('idle')
-
-  const items: { anim: AvatarAnimation; emoji: string; label: string }[] = [
-    { anim: 'idle',      emoji: '😊', label: 'Attente' },
-    { anim: 'wave',      emoji: '👋', label: 'Salut' },
-    { anim: 'thinking',  emoji: '🤔', label: 'Réfléchit' },
-    { anim: 'talking',   emoji: '🗣️', label: 'Parle' },
-    { anim: 'walking',   emoji: '🚶', label: 'Se déplace' },
-    { anim: 'happy',     emoji: '😄', label: 'Heureux' },
-    { anim: 'celebrate', emoji: '🎉', label: 'Fête' },
-    { anim: 'sleeping',  emoji: '😴', label: 'Dort' },
-    { anim: 'surprised', emoji: '😲', label: 'Surpris' },
-    { anim: 'confused',  emoji: '😕', label: 'Confus' },
-    { anim: 'loading',   emoji: '⏳', label: 'Charge' },
-    { anim: 'nod',       emoji: '✅', label: 'Oui' },
-    { anim: 'shake',     emoji: '❌', label: 'Non' },
-    { anim: 'excited',   emoji: '⚡', label: 'Excité' },
-    { anim: 'shy',       emoji: '🙈', label: 'Timide' },
-    { anim: 'angry',     emoji: '😠', label: 'En colère' },
-    { anim: 'love',      emoji: '❤️', label: 'Amour' },
-    { anim: 'typing',    emoji: '⌨️', label: 'Tape' },
-    { anim: 'search',    emoji: '🔍', label: 'Cherche' },
-    { anim: 'arrive',    emoji: '🚀', label: 'Arrive' },
-  ]
-
-  return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      <div className="flex justify-center">
-        <AvatarBouba animation={animation} size={120} autoIdle={false} className="rounded-3xl border-4 border-primary/20 shadow-xl" />
-      </div>
-      <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
-        {items.map(item => (
-          <button
-            key={item.anim}
-            onClick={() => { setActive(item.anim); play(item.anim) }}
-            className={cn(
-              'flex flex-col items-center gap-1 p-2 rounded-2xl border text-xs font-medium transition-all',
-              active === item.anim
-                ? 'bg-primary text-white border-primary shadow-violet'
-                : 'bg-surface border-border text-muted hover:border-primary/40 hover:bg-primary/5'
-            )}
-          >
-            <span className="text-lg">{item.emoji}</span>
-            <span className="truncate w-full text-center text-[10px]">{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export default function LandingPage() {
   const [isScrolled, setIsScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -377,25 +322,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Animation Showcase Section */}
-      <section className="py-24 bg-gradient-to-b from-surface to-background overflow-hidden">
-        <div className="max-w-4xl mx-auto px-6 text-center space-y-10">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="space-y-3"
-          >
-            <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest">
-              <Sparkles className="w-4 h-4" /> 20 expressions
-            </div>
-            <h2 className="text-4xl font-display font-bold text-secondary">Bouba est vivant.</h2>
-            <p className="text-muted max-w-xl mx-auto">Cliquez sur une émotion pour voir Bouba l'exprimer. Il réagit, parle, marche, dort, célèbre…</p>
-          </motion.div>
-          <AnimationShowcase />
-        </div>
-      </section>
-
       {/* Pricing Section */}
       <section id="pricing" className="py-32 bg-surface">
         <div className="max-w-7xl mx-auto px-6">
@@ -425,9 +351,14 @@ export default function LandingPage() {
                     <h3 className="text-xl font-bold text-secondary">{plan.name}</h3>
                     <div className="flex items-baseline gap-1 mt-4">
                       <span className="text-4xl font-display font-bold text-secondary">
-                        {Math.floor(plan.price / 100)}€
+                        {plan.price === 0
+                          ? 'Gratuit'
+                          : `${(plan.price / 100).toLocaleString('fr-FR', {
+                              minimumFractionDigits: plan.price % 100 === 0 ? 0 : 2,
+                              maximumFractionDigits: 2,
+                            })}€`}
                       </span>
-                      <span className="text-muted text-sm">/ mois</span>
+                      {plan.price > 0 && <span className="text-muted text-sm">/ mois</span>}
                     </div>
                     <p className="text-sm text-muted mt-2">{plan.description}</p>
                   </div>

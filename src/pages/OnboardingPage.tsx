@@ -75,21 +75,20 @@ export default function OnboardingPage() {
   }
 
   const handleCompleteOnboarding = async () => {
-    try {
-      // Maintenant que les colonnes sont ajoutées, sauvegarder toutes les préférences
-      await updateProfile({
-        onboarding_complete: true,
-        work_type: config.workType,
-        timezone: config.timezone,
-        language: config.language
-      })
-      
-      toast.success("Configuration terminée ! Bienvenue sur Bouba'ia !")
-      navigate('/dashboard', { replace: true })
-    } catch (error) {
-      console.error('Onboarding completion error:', error)
+    const result = await updateProfile({
+      onboarding_complete: true,
+      work_type: config.workType,
+      timezone: config.timezone,
+      language: config.language
+    })
+
+    if (!result.success) {
       toast.error('Erreur lors de la finalisation. Veuillez réessayer.')
+      return
     }
+
+    toast.success("Configuration terminée ! Bienvenue sur Bouba'ia !")
+    navigate('/dashboard', { replace: true })
   }
 
   return (

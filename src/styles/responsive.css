@@ -1,0 +1,285 @@
+/* Responsive styles for Bouba'IA Mobile */
+
+/* ===== BREAKPOINTS ===== */
+/* Mobile: < 640px (par défaut Tailwind) */
+/* Tablet: 640px - 1024px */
+/* Desktop: > 1024px */
+
+/* ===== GLOBAL RESPONSIVE ===== */
+@media (max-width: 640px) {
+  /* Réduire les paddings sur mobile */
+  .p-4, .p-6, .p-8 {
+    padding: 1rem !important;
+  }
+  
+  .px-4, .px-6, .px-8 {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+  
+  .py-4, .py-6, .py-8 {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+  }
+  
+  /* Textes plus petits sur mobile */
+  h1 {
+    font-size: 1.75rem !important;
+    line-height: 2rem !important;
+  }
+  
+  h2 {
+    font-size: 1.5rem !important;
+    line-height: 1.75rem !important;
+  }
+  
+  h3 {
+    font-size: 1.25rem !important;
+    line-height: 1.5rem !important;
+  }
+  
+  .text-3xl {
+    font-size: 1.5rem !important;
+    line-height: 2rem !important;
+  }
+  
+  .text-2xl {
+    font-size: 1.25rem !important;
+    line-height: 1.75rem !important;
+  }
+  
+  /* Boutons plus grands sur mobile */
+  button, .btn-primary, .btn-secondary {
+    min-height: 44px !important; /* Taille tactile minimale */
+    padding: 0.75rem 1rem !important;
+  }
+  
+  /* Inputs plus grands */
+  input, select, textarea {
+    min-height: 44px !important;
+    font-size: 16px !important; /* Évite le zoom iOS */
+  }
+}
+
+/* ===== SIDEBAR RESPONSIVE ===== */
+@media (max-width: 768px) {
+  /* Sidebar devient un menu hamburger */
+  .sidebar-desktop {
+    display: none !important;
+  }
+  
+  .sidebar-mobile {
+    display: block !important;
+  }
+  
+  /* Contenu principal prend toute la largeur */
+  .main-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+}
+
+/* ===== TABLES RESPONSIVE ===== */
+@media (max-width: 768px) {
+  /* Tables deviennent des cartes sur mobile */
+  .responsive-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .responsive-table table {
+    min-width: 600px; /* Largeur minimale pour scroll */
+  }
+  
+  /* Alternative: tables en cartes */
+  .table-card-view {
+    display: block;
+  }
+  
+  .table-card-view thead {
+    display: none;
+  }
+  
+  .table-card-view tbody tr {
+    display: block;
+    margin-bottom: 1rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+  }
+  
+  .table-card-view tbody td {
+    display: block;
+    text-align: right;
+    padding: 0.5rem 0;
+    border: none;
+  }
+  
+  .table-card-view tbody td::before {
+    content: attr(data-label);
+    float: left;
+    font-weight: 600;
+    color: #6b7280;
+  }
+}
+
+/* ===== GRIDS RESPONSIVE ===== */
+@media (max-width: 640px) {
+  /* 1 colonne sur mobile */
+  .grid-cols-2, .grid-cols-3, .grid-cols-4 {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* 2 colonnes sur tablette */
+  @media (min-width: 641px) and (max-width: 1024px) {
+    .grid-cols-3, .grid-cols-4 {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+  }
+}
+
+/* ===== NAVIGATION MOBILE ===== */
+.mobile-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  border-top: 1px solid #e5e7eb;
+  padding: 0.5rem;
+  z-index: 50;
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    display: flex;
+  }
+  
+  /* Espace pour la navigation mobile */
+  body {
+    padding-bottom: 70px !important;
+  }
+}
+
+/* ===== UTILITIES ===== */
+/* Cache sur mobile */
+.mobile-hidden {
+  display: none !important;
+}
+
+@media (min-width: 769px) {
+  .mobile-hidden {
+    display: block !important;
+  }
+  
+  .desktop-hidden {
+    display: none !important;
+  }
+}
+
+/* Affiche sur mobile */
+@media (max-width: 768px) {
+  .mobile-visible {
+    display: block !important;
+  }
+  
+  .desktop-visible {
+    display: none !important;
+  }
+}
+
+/* Touch-friendly */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Prévenir le zoom sur iOS */
+input, select, textarea {
+  font-size: 16px;
+}
+
+/* Scroll smooth */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Optimisation performance mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Support dark mode */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+/* ===== SAFE AREAS (iPhone encoches) ===== */
+.safe-area-pt {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-pl {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.safe-area-pr {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.safe-area-inset {
+  padding: env(safe-area-inset-top, 0px) 
+           env(safe-area-inset-right, 0px) 
+           env(safe-area-inset-bottom, 0px) 
+           env(safe-area-inset-left, 0px);
+}
+
+/* Pour la navigation mobile en bas */
+.mobile-bottom-nav {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ===== PWA (Progressive Web App) ===== */
+@media (display-mode: standalone) {
+  body {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Cacher la barre d'adresse sur iOS */
+  .pwa-header {
+    height: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* ===== PERFORMANCE MOBILE ===== */
+@media (max-width: 768px) {
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Optimiser les animations pour mobile */
+  .mobile-optimize {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+  }
+}
+
+/* ===== IMPRESSION ===== */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+}

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'motion/react'
 import {
   Camera, Save, Download, Trash2, ShieldCheck, AlertTriangle,
@@ -59,19 +59,30 @@ const AVATAR_GRADIENTS = [
 ]
 
 export default function ProfilePage() {
-  const { profile, user, updateProfile } = useAuth()
+  const { profile, user, updateProfile, refreshProfile } = useAuth()
   const { connections } = useConnections()
   const { getUsageStatus } = usePlans()
   const { company, setCompany } = useCompanyStore()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const logoInputRef = useRef<HTMLInputElement>(null)
 
+  // Historique des transactions de l'utilisateur (paiements)
+  const [transactions, setTransactions] = useState<any[] | null>(null)
+  useEffect(() => {
+    if (!user?.id) return
+    fetch(`/api/payments/${user.id}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => setTransactions(j.payments ?? j.data ?? []))
+      .catch(() => setTransactions([]))
+  }, [user?.id])
+
   const [isDeleting, setIsDeleting] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
   const [isSavingCompany, setIsSavingCompany] = useState(false)
   const [isOpeningPortal, setIsOpeningPortal] = useState(false)
-  const [companyForm, setCompanyForm] = useState({ ...company })
+  // DB data (profile.preferences.company_info) takes priority over localStorage (company store)
+  const [companyForm, setCompanyForm] = useState({ ...company, ...(profile?.preferences?.company_info || {}) })
   const [formData, setFormData] = useState({
     first_name: profile?.first_name || '',
     last_name: profile?.last_name || '',
@@ -164,8 +175,11 @@ export default function ProfilePage() {
       })
       if (response.ok) {
         toast.success('Photo de profil mise à jour !')
+        // Rafraîchir le profil pour afficher la nouvelle photo immédiatement
+        refreshProfile?.()
       } else {
-        throw new Error()
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || '')
       }
     } catch {
       toast.error("Erreur lors du téléchargement de l'avatar")
@@ -179,10 +193,15 @@ export default function ProfilePage() {
   const handleSaveCompany = async () => {
     setIsSavingCompany(true)
     try {
-      setCompany(companyForm)
-      toast.success('Informations entreprise sauvegardées !')
-    } catch {
-      toast.error('Erreur lors de la sauvegarde')
+      const result = await updateProfile({ company_info: companyForm } as any)
+      if (result.success) {
+        setCompany(companyForm)
+        toast.success('Informations entreprise sauvegardées !')
+      } else {
+        throw new Error(result.error || 'Erreur lors de la sauvegarde')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Erreur lors de la sauvegarde')
     } finally {
       setIsSavingCompany(false)
     }
@@ -496,6 +515,46 @@ export default function ProfilePage() {
             </a>
           </div>
         )}
+
+        {/* ── Mes transactions ─────────────────────────────── */}
+        <div className="pt-4 border-t border-border space-y-3">
+          <p className="text-xs font-bold text-muted uppercase tracking-widest">Mes transactions</p>
+          {transactions === null ? (
+            <p className="text-xs text-muted">Chargement…</p>
+          ) : transactions.length === 0 ? (
+            <p className="text-xs text-muted">Aucune transaction pour le moment.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {transactions.slice(0, 8).map((t: any) => {
+                const paid = ['succeeded', 'completed', 'paid'].includes(t.status)
+                const cur = (t.currency || 'EUR').toUpperCase()
+                const amount = cur === 'EUR' && Number(t.amount) > 200 ? Number(t.amount) / 100 : Number(t.amount)
+                const symbol = cur === 'EUR' ? '€' : cur === 'XOF' ? 'FCFA' : cur
+                return (
+                  <div key={t.id} className="py-2.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-secondary">
+                        {amount.toLocaleString('fr-FR')} {symbol}
+                      </p>
+                      <p className="text-[11px] text-muted">
+                        {new Date(t.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                        {t.metadata?.payment_method === 'wave' && ' · Wave'}
+                      </p>
+                    </div>
+                    <span className={
+                      'text-[10px] font-bold px-2 py-0.5 rounded-full uppercase shrink-0 ' +
+                      (paid ? 'bg-emerald-100 text-emerald-700'
+                        : t.status === 'pending' ? 'bg-amber-100 text-amber-700'
+                        : 'bg-red-100 text-red-600')
+                    }>
+                      {paid ? 'Payé' : t.status === 'pending' ? 'En attente' : 'Échoué'}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </motion.div>
 
       {/* ── Personal Information Form ─────────────────────── */}

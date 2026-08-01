@@ -143,8 +143,8 @@ type Tab = 'individual' | 'broadcast_email' | 'broadcast_app' | 'history'
 interface UserOption {
   id: string
   email: string
-  first_name: string | null
-  last_name: string | null
+  firstName: string | null
+  lastName: string | null
 }
 
 interface NotifRecord {
@@ -208,7 +208,7 @@ function IndividualEmailForm() {
     const q = search.toLowerCase()
     return (
       u.email.toLowerCase().includes(q) ||
-      `${u.first_name ?? ''} ${u.last_name ?? ''}`.toLowerCase().includes(q)
+      `${u.firstName ?? ''} ${u.lastName ?? ''}`.toLowerCase().includes(q)
     )
   })
 
@@ -233,7 +233,8 @@ function IndividualEmailForm() {
       })
       const data = await res.json()
       if (data.success) {
-        toast.success('Email envoyé via Bouba.')
+        if (data.emailSent) toast.success(data.message || 'Email envoyé au destinataire.')
+        else toast.warning(data.message || 'Notification créée, mais l\'email n\'est pas parti (clé Resend manquante).')
         setSelectedUser(null)
         setSearch('')
         setSubject('')
@@ -259,7 +260,7 @@ function IndividualEmailForm() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input
             type="text"
-            value={selectedUser ? `${selectedUser.first_name ?? ''} ${selectedUser.last_name ?? ''} <${selectedUser.email}>` : search}
+            value={selectedUser ? `${selectedUser.firstName ?? ''} ${selectedUser.lastName ?? ''} <${selectedUser.email}>` : search}
             onChange={(e) => {
               setSearch(e.target.value)
               setSelectedUser(null)
@@ -289,7 +290,7 @@ function IndividualEmailForm() {
                   className="w-full text-left px-4 py-2.5 hover:bg-background text-sm transition-colors"
                 >
                   <p className="font-medium text-secondary">
-                    {u.first_name} {u.last_name}
+                    {u.firstName} {u.lastName}
                   </p>
                   <p className="text-xs text-muted">{u.email}</p>
                 </button>
@@ -373,7 +374,8 @@ function BroadcastEmailForm() {
       })
       const data = await res.json()
       if (data.success) {
-        toast.success(`Email broadcast envoyé à ${data.recipients ?? 'tous les'} utilisateurs.`)
+        if (data.emailSent) toast.success(data.message || `Email envoyé à ${data.data?.recipients ?? 'tous les'} utilisateur(s).`)
+        else toast.warning(data.message || 'Notifications créées, mais les emails ne sont pas partis (clé Resend manquante).')
         setSubject('')
         setBody('')
       } else {
@@ -711,7 +713,7 @@ export default function AdminConversationsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('individual')
 
   return (
-    <div className="p-8 space-y-8 max-w-5xl mx-auto">
+    <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-display font-bold text-secondary">Conversations</h1>
         <p className="text-muted mt-1">Envoyez des emails ou notifications à vos utilisateurs.</p>

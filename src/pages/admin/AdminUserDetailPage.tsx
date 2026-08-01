@@ -10,6 +10,9 @@ import {
   MessageCircle,
   TrendingUp,
   X,
+  KeyRound,
+  Trash2,
+  FileText,
 } from 'lucide-react'
 import { cn } from '@/src/lib/utils'
 import { toast } from 'sonner'
@@ -32,7 +35,13 @@ const AGENT_COLORS: Record<string, string> = {
   general: 'bg-gray-100 text-gray-600',
 }
 
-const PLAN_OPTIONS = ['starter', 'pro', 'enterprise']
+const PLAN_OPTIONS = ['free', 'starter', 'business']
+
+const ROLE_LABELS: Record<string, string> = {
+  user: 'Utilisateur',
+  admin: 'Admin',
+  superadmin: 'Super Admin',
+}
 
 export default function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -42,9 +51,16 @@ export default function AdminUserDetailPage() {
   const [loading, setLoading] = useState(true)
   const [plan, setPlan] = useState('')
   const [status, setStatus] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [deleting, setDeleting] = useState(false)
   const [showSuspendModal, setShowSuspendModal] = useState(false)
   const [suspensionReason, setSuspensionReason] = useState(SUSPENSION_REASONS[0])
   const [suspending, setSuspending] = useState(false)
+  const [resettingPassword, setResettingPassword] = useState(false)
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [emailForm, setEmailForm] = useState({ subject: '', body: '' })
+  const [sendingEmail, setSendingEmail] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -56,6 +72,8 @@ export default function AdminUserDetailPage() {
           setUser(json.data)
           setPlan(json.data.plan)
           setStatus(json.data.status)
+          setFirstName(json.data.firstName || '')
+          setLastName(json.data.lastName || '')
         }
       })
       .catch(() => toast.error('Erreur lors du chargement de l\'utilisateur.'))
@@ -68,16 +86,35 @@ export default function AdminUserDetailPage() {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, status }),
+        body: JSON.stringify({ plan, status, firstName, lastName }),
       })
       const json = await res.json()
       if (json.success !== false) {
-        toast.success(`Modifications sauvegardées pour ${user.firstName} ${user.lastName}`)
+        toast.success(`Modifications sauvegardées pour ${displayName}`)
       } else {
-        toast.error('Erreur lors de la sauvegarde.')
+        toast.error(json.error || 'Erreur lors de la sauvegarde.')
       }
     } catch {
       toast.error('Erreur lors de la sauvegarde.')
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`⚠️ Supprimer DÉFINITIVEMENT le compte ${user.email} et toutes ses données (messages, paiements, contacts…) ?\n\nCette action est irréversible.`)) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE', credentials: 'include' })
+      const json = await res.json()
+      if (json.success) {
+        toast.success(json.message || 'Compte supprimé.')
+        navigate('/admin/users')
+      } else {
+        toast.error(json.error || 'Erreur lors de la suppression')
+      }
+    } catch {
+      toast.error('Erreur réseau')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -123,7 +160,59 @@ export default function AdminUserDetailPage() {
   }
 
   const handleSendEmail = () => {
-    toast.info(`Email envoyé à ${user.email}`)
+    setEmailForm({ subject: '', body: '' })
+    setShowEmailModal(true)
+  }
+
+  const handleSendEmailSubmit = async () => {
+    if (!emailForm.subject.trim()) { toast.error('Objet requis'); return }
+    if (!emailForm.body.trim()) { toast.error('Message requis'); return }
+    setSendingEmail(true)
+    try {
+      // Vrai email (Resend) + notification in-app côté backend
+      const res = await fetch(`/api/admin/users/${user.id}/send-email`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: emailForm.subject.trim(),
+          body: emailForm.body.trim(),
+        }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        if (json.emailSent) toast.success(json.message || `Email envoyé à ${user.email}`)
+        else toast.warning(json.message || 'Email non parti (clé Resend manquante), notification in-app créée.')
+        setShowEmailModal(false)
+      } else {
+        toast.error(json.error || 'Erreur lors de l\'envoi')
+      }
+    } catch {
+      toast.error('Erreur réseau')
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
+  const handleResetPassword = async () => {
+    if (!confirm(`Réinitialiser le mot de passe de ${displayName} ? Un email avec un mot de passe temporaire sera envoyé à ${user.email}.`)) return
+    setResettingPassword(true)
+    try {
+      const res = await fetch(`/api/admin/users/${id}/reset-password`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const json = await res.json()
+      if (json.success) {
+        toast.success(json.message || 'Mot de passe réinitialisé et email envoyé.')
+      } else {
+        toast.error(json.error || 'Erreur lors de la réinitialisation.')
+      }
+    } catch {
+      toast.error('Erreur réseau.')
+    } finally {
+      setResettingPassword(false)
+    }
   }
 
   if (loading) {
@@ -140,10 +229,12 @@ export default function AdminUserDetailPage() {
     )
   }
 
+  const displayName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Utilisateur'
+  const userInitial = displayName.charAt(0).toUpperCase()
   const pct = Math.round((user.messagesUsed / user.messagesLimit) * 100)
 
   return (
-    <div className="p-8 space-y-8 max-w-5xl mx-auto">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-4">
         <button
@@ -154,11 +245,11 @@ export default function AdminUserDetailPage() {
         </button>
         <div className="flex items-center gap-4 flex-1">
           <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold text-xl">
-            {user.firstName[0]}
+            {userInitial}
           </div>
           <div>
             <h1 className="text-2xl font-display font-bold text-secondary">
-              {user.firstName} {user.lastName}
+              {displayName}
             </h1>
             <p className="text-sm text-muted">{user.email}</p>
           </div>
@@ -181,13 +272,43 @@ export default function AdminUserDetailPage() {
             <h3 className="font-bold text-secondary text-sm uppercase tracking-widest">Informations du compte</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
+                <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1.5">Prénom</label>
+                <input
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="Prénom"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1.5">Nom</label>
+                <input
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="Nom"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1.5">Rôle</label>
+                <p className="text-sm text-secondary bg-background border border-border rounded-xl px-3 py-2">
+                  {ROLE_LABELS[user.role] || user.role || 'Utilisateur'}
+                </p>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1.5">Prochain paiement</label>
+                <p className="text-sm text-secondary bg-background border border-border rounded-xl px-3 py-2">
+                  {user.nextPayment ? new Date(user.nextPayment).toLocaleDateString('fr-FR') : '—'}
+                </p>
+              </div>
+              <div>
                 <label className="text-[10px] font-bold text-muted uppercase tracking-widest block mb-1.5">Plan</label>
                 <select
                   value={plan}
                   onChange={(e) => setPlan(e.target.value)}
                   className="w-full bg-background border border-border rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
                 >
-                  {PLAN_OPTIONS.map((p) => (
+                  {(PLAN_OPTIONS.includes(plan) ? PLAN_OPTIONS : [...PLAN_OPTIONS, plan]).map((p) => (
                     <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
                   ))}
                 </select>
@@ -216,12 +337,20 @@ export default function AdminUserDetailPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 pt-2 border-t border-border">
+            <div className="flex items-center gap-2 pt-2 border-t border-border flex-wrap">
               <button
                 onClick={handleResetQuota}
                 className="flex items-center gap-2 text-xs btn-ghost border border-border"
               >
                 <RefreshCw className="w-3.5 h-3.5" /> Réinitialiser le quota
+              </button>
+              <button
+                onClick={handleResetPassword}
+                disabled={resettingPassword}
+                className="flex items-center gap-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-xl font-medium hover:bg-amber-100 transition-colors disabled:opacity-50"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                {resettingPassword ? 'Envoi…' : 'Réinitialiser le mot de passe'}
               </button>
               {status === 'active' ? (
                 <button
@@ -247,6 +376,16 @@ export default function AdminUserDetailPage() {
                   className="flex items-center gap-2 text-xs bg-success/10 text-success border border-success/20 px-3 py-1.5 rounded-xl font-medium hover:bg-success/20 transition-colors"
                 >
                   <Shield className="w-3.5 h-3.5" /> Réactiver le compte
+                </button>
+              )}
+              {(user.role !== 'admin' && user.role !== 'superadmin') && (
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="flex items-center gap-2 text-xs bg-danger text-white px-3 py-1.5 rounded-xl font-medium hover:bg-danger/90 transition-colors disabled:opacity-50 ml-auto"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {deleting ? 'Suppression…' : 'Supprimer le compte'}
                 </button>
               )}
             </div>
@@ -277,18 +416,30 @@ export default function AdminUserDetailPage() {
             </h3>
             <div className="divide-y divide-border">
               {(user.billing || []).map((b: any) => (
-                <div key={b.id} className="py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-secondary font-medium">{b.description}</p>
+                <div key={b.id} className="py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-secondary font-medium truncate">{b.description}</p>
                     <p className="text-xs text-muted mt-0.5">{new Date(b.date).toLocaleDateString('fr-FR')}</p>
+                    {b.proofName && (
+                      <a
+                        href={`/api/admin/users/${id}/payment-proof/${b.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1"
+                      >
+                        <FileText className="w-3 h-3" /> Justificatif : {b.proofName}
+                      </a>
+                    )}
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     <span className="text-sm font-bold text-secondary">{b.amount} €</span>
                     <span className={cn(
                       'text-[10px] font-bold px-2 py-0.5 rounded-full uppercase',
-                      b.status === 'paid' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
+                      (b.status === 'paid' || b.status === 'succeeded') ? 'bg-success/10 text-success'
+                        : b.status === 'pending' ? 'bg-warning/10 text-warning'
+                        : 'bg-danger/10 text-danger'
                     )}>
-                      {b.status === 'paid' ? 'Payé' : 'Échoué'}
+                      {(b.status === 'paid' || b.status === 'succeeded') ? 'Payé' : b.status === 'pending' ? 'En attente' : 'Échoué'}
                     </span>
                   </div>
                 </div>
@@ -356,7 +507,7 @@ export default function AdminUserDetailPage() {
               Demander à Bouba
             </p>
             <p className="text-xs text-secondary leading-relaxed">
-              "Envoie un email de relance à {user.firstName} {user.lastName} pour régulariser son abonnement"
+              "Envoie un email de relance à {displayName} pour régulariser son abonnement"
             </p>
           </div>
         </div>
@@ -373,7 +524,7 @@ export default function AdminUserDetailPage() {
                 </div>
                 <div>
                   <h3 className="font-bold text-secondary text-base">Suspendre le compte</h3>
-                  <p className="text-xs text-muted">{user.firstName} {user.lastName}</p>
+                  <p className="text-xs text-muted">{displayName}</p>
                 </div>
               </div>
               <button
@@ -419,6 +570,56 @@ export default function AdminUserDetailPage() {
               >
                 <Ban className="w-4 h-4" />
                 {suspending ? 'Suspension…' : 'Confirmer la suspension'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal : Envoyer un message ─────────────────────────── */}
+      {showEmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h3 className="font-bold text-gray-900">Envoyer un message à {user.firstName || user.email}</h3>
+              <button onClick={() => setShowEmailModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Objet</label>
+                <input
+                  type="text"
+                  value={emailForm.subject}
+                  onChange={(e) => setEmailForm(f => ({ ...f, subject: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Objet du message…"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1.5">Message</label>
+                <textarea
+                  value={emailForm.body}
+                  onChange={(e) => setEmailForm(f => ({ ...f, body: e.target.value }))}
+                  rows={5}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  placeholder="Votre message…"
+                />
+              </div>
+              <p className="text-xs text-gray-400">Un vrai email sera envoyé à <strong>{user.email}</strong> (+ une notification dans l'application).</p>
+            </div>
+            <div className="flex gap-3 p-5 pt-0">
+              <button onClick={() => setShowEmailModal(false)} className="flex-1 btn-ghost border border-gray-200 text-sm">
+                Annuler
+              </button>
+              <button
+                onClick={handleSendEmailSubmit}
+                disabled={sendingEmail}
+                className="flex-1 btn-primary text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Mail className="w-4 h-4" />
+                {sendingEmail ? 'Envoi…' : 'Envoyer'}
               </button>
             </div>
           </div>

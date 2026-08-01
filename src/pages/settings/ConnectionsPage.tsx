@@ -1,17 +1,31 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { Mail, Calendar, Users, Database, CheckCircle2, XCircle, RefreshCw, Plus, Settings, MessageSquare, FileText, Building2, Lock, Sparkles, Globe, Zap, BookOpen } from 'lucide-react'
 import { cn } from '@/src/lib/utils'
 import { useAuth } from '@/src/hooks/useAuth'
 import { usePlans } from '@/src/hooks/usePlans'
 import { useConnections } from '@/src/hooks/useConnections'
+import { useActiveApps } from '@/src/hooks/useActiveApps'
 import ConnectionSyncSettings from '@/src/components/connections/ConnectionSyncSettings'
 import { toast } from 'sonner'
 
 export default function ConnectionsPage() {
+  console.log('🔄 ConnectionsPage: Component rendering')
+
   const { user, profile } = useAuth()
   const { hasFeatureAccess } = usePlans()
   const { connections, connect, disconnect, refreshConnection, updateSyncSettings, isConnecting } = useConnections()
+
+  // Catalogue admin autoritaire : app désactivée OU supprimée → masquée partout
+  const { isAppAvailable } = useActiveApps()
+  
+  console.log('🔍 ConnectionsPage: State', {
+    hasUser: !!user,
+    hasProfile: !!profile,
+    profilePlanId: profile?.plan_id,
+    connectionsCount: connections?.length,
+    connections: connections
+  })
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [syncSettingsModal, setSyncSettingsModal] = useState<{
     isOpen: boolean
@@ -164,8 +178,7 @@ export default function ConnectionsPage() {
       case 'gitlab':
       case 'mailchimp':
       case 'googlemeet':
-        // Starter: verrouillé, Pro: disponible
-        return { available: hasFeatureAccess('pro'), requiredPlan: 'Pro' }
+        return { available: hasFeatureAccess('calendar'), requiredPlan: 'Starter' }
       case 'office365':
       case 'slack':
       case 'notion':
@@ -207,7 +220,7 @@ export default function ConnectionsPage() {
         animate={{ opacity: 1, y: 0 }}
         className="space-y-2"
       >
-        <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-blue-800 bg-clip-text text-transparent">Connexions</h2>
+        <h2 className="text-3xl font-bold text-secondary">Connexions</h2>
         <p className="text-gray-600">Gérez les intégrations avec vos outils tiers pour une expérience personnalisée.</p>
         
         {/* Plan limitations */}
@@ -218,10 +231,10 @@ export default function ConnectionsPage() {
               <div>
                 <h3 className="font-semibold text-orange-800">Fonctionnalités limitées</h3>
                 <p className="text-sm text-orange-700 mt-1">
-                  Votre plan Starter inclut uniquement Gmail. 
+                  Votre plan gratuit inclut uniquement Gmail.
                   <a href="/settings/plan" className="font-semibold underline ml-1">
-                    Mettez à niveau vers Pro
-                  </a> pour débloquer Calendar, Contacts et Finance.
+                    Mettez à niveau vers Starter
+                  </a> pour débloquer Calendar, Contacts et toutes les intégrations.
                 </p>
               </div>
             </div>
@@ -279,45 +292,33 @@ export default function ConnectionsPage() {
       )}
 
       {/* Stats */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="grid grid-cols-1 md:grid-cols-3 gap-6"
+        className="grid grid-cols-1 md:grid-cols-2 gap-6"
       >
         <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-6 border border-green-200/60">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-green-700">Connectées</p>
               <p className="text-2xl font-bold text-green-800">
-                {(connections || []).filter(c => c.status === 'connected' && getConnectionAccess(c.id).available).length}
+                {(connections || []).filter(c => c.status === 'connected' && getConnectionAccess(c.id).available && isAppAvailable(c.id)).length}
               </p>
             </div>
             <CheckCircle2 className="w-8 h-8 text-green-600" />
           </div>
         </div>
-        
+
         <div className="bg-gradient-to-br from-orange-50 to-yellow-50 rounded-2xl p-6 border border-orange-200/60">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-orange-700">Disponibles</p>
               <p className="text-2xl font-bold text-orange-800">
-                {(connections || []).filter(c => getConnectionAccess(c.id).available && c.status !== 'connected').length}
+                {(connections || []).filter(c => getConnectionAccess(c.id).available && isAppAvailable(c.id) && c.status !== 'connected').length}
               </p>
             </div>
             <XCircle className="w-8 h-8 text-orange-600" />
-          </div>
-        </div>
-        
-        <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-2xl p-6 border border-purple-200/60">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-purple-700">Verrouillées</p>
-              <p className="text-2xl font-bold text-purple-800">
-                {(connections || []).filter(c => !getConnectionAccess(c.id).available).length}
-              </p>
-            </div>
-            <Lock className="w-8 h-8 text-purple-600" />
           </div>
         </div>
       </motion.div>
@@ -342,71 +343,51 @@ export default function ConnectionsPage() {
 
             {/* Services recommandés */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {['gmail', 'calendar', 'contacts', 'trello', 'googledrive', 'onedrive', 'dropbox', 'github', 'gitlab', 'mailchimp', 'googlemeet', 'slack', 'notion', 'office365', 'hubspot'].map((serviceId) => {
-                const access = getConnectionAccess(serviceId)
+              {['gmail', 'calendar', 'contacts', 'trello', 'googledrive', 'onedrive', 'dropbox', 'github', 'gitlab', 'mailchimp', 'googlemeet', 'slack', 'notion', 'office365', 'hubspot']
+                .filter((serviceId) => isAppAvailable(serviceId) && getConnectionAccess(serviceId).available)
+                .map((serviceId) => {
                 const service = serviceInfo[serviceId as keyof typeof serviceInfo]
                 const colors = connectionColors[serviceId as keyof typeof connectionColors]
-                const isLocked = !access.available
 
                 return (
-                  <div 
+                  <div
                     key={serviceId}
-                    className={cn(
-                      "p-4 rounded-xl border transition-all",
-                      isLocked 
-                        ? "bg-gray-50 border-gray-200 opacity-60" 
-                        : "bg-white border-gray-200 hover:shadow-md cursor-pointer"
-                    )}
+                    className="p-4 rounded-xl border bg-white border-gray-200 hover:shadow-md cursor-pointer transition-all"
                   >
                     <div className="flex items-center gap-3 mb-3">
                       <div className={cn(
                         "p-2 rounded-lg border flex items-center justify-center",
-                        isLocked ? "bg-gray-200 text-gray-400 border-gray-300" : `${colors?.bg} ${colors?.text} ${colors?.border}`
+                        `${colors?.bg} ${colors?.text} ${colors?.border}`
                       )}>
                         <ServiceIcon serviceId={serviceId} className="w-5 h-5" />
                       </div>
                       <div>
-                        <h4 className={cn(
-                          "font-semibold text-sm",
-                          isLocked ? "text-gray-500" : "text-gray-900"
-                        )}>
+                        <h4 className="font-semibold text-sm text-gray-900">
                           {service?.name}
                         </h4>
                         <span className={cn(
                           "text-xs px-1.5 py-0.5 rounded font-medium",
-                          isLocked ? "bg-gray-200 text-gray-500" : `${colors?.bg} ${colors?.text}`
+                          `${colors?.bg} ${colors?.text}`
                         )}>
                           {service?.company}
                         </span>
                       </div>
                     </div>
-                    
-                    {isLocked ? (
-                      <div>
-                        <p className="text-xs text-gray-400 mb-2">Nécessite {access.requiredPlan}+</p>
-                        <button 
-                          onClick={() => window.location.href = '/settings/plan'}
-                          className="w-full bg-orange-500 hover:bg-orange-600 text-white py-2 px-3 rounded-lg text-xs font-medium transition-colors"
-                        >
-                          Mettre à niveau
-                        </button>
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={() => handleConnect(serviceId)}
-                        className={cn(
-                          "w-full py-2 px-3 rounded-lg text-xs font-medium text-white transition-colors",
-                          serviceId === 'gmail' ? "bg-red-600 hover:bg-red-700" :
-                          serviceId === 'calendar' ? "bg-blue-600 hover:bg-blue-700" :
-                          serviceId === 'contacts' ? "bg-green-600 hover:bg-green-700" :
-                          serviceId === 'airtable' ? "bg-yellow-600 hover:bg-yellow-700" :
-                          serviceId === 'slack' ? "bg-purple-600 hover:bg-purple-700" :
-                          "bg-gray-700 hover:bg-gray-800"
-                        )}
-                      >
-                        Connecter
-                      </button>
-                    )}
+
+                    <button
+                      onClick={() => handleConnect(serviceId)}
+                      className={cn(
+                        "w-full py-2 px-3 rounded-lg text-xs font-medium text-white transition-colors",
+                        serviceId === 'gmail' ? "bg-red-600 hover:bg-red-700" :
+                        serviceId === 'calendar' ? "bg-blue-600 hover:bg-blue-700" :
+                        serviceId === 'contacts' ? "bg-green-600 hover:bg-green-700" :
+                        serviceId === 'airtable' ? "bg-yellow-600 hover:bg-yellow-700" :
+                        serviceId === 'slack' ? "bg-purple-600 hover:bg-purple-700" :
+                        "bg-gray-700 hover:bg-gray-800"
+                      )}
+                    >
+                      Connecter
+                    </button>
                   </div>
                 )
               })}
@@ -414,7 +395,10 @@ export default function ConnectionsPage() {
           </motion.div>
         ) : (
           ['Communication', 'Productivité', 'Données'].map((category, categoryIndex) => {
-            const categoryConnections = (connections || []).filter(c => c.category === category)
+            const categoryConnections = (connections || []).filter(c =>
+              serviceInfo[c.id as keyof typeof serviceInfo]?.category === category
+              && isAppAvailable(c.id)
+              && getConnectionAccess(c.id).available)
             if (categoryConnections.length === 0) return null
           
             return (

@@ -109,27 +109,42 @@ export const useEmailStore = create<EmailState>()(
           // Backend returns { success: true, data: GmailMessage[] }
           // Map backend field names to store Email interface
           const raw: any[] = data.data || data.emails || []
-          const emails: Email[] = raw.map((m: any) => ({
-            id: m.gmail_id || m.id || String(Math.random()),
-            // from_name is display name, fallback to from_email if empty
-            from: m.from_name || m.from_email || m.from || '(Expéditeur inconnu)',
-            fromEmail: m.from_email || m.fromEmail || '',
-            to: m.to_email || m.to || '',
-            subject: m.subject || '(Sans objet)',
-            body: m.body || m.snippet || '',
-            htmlBody: m.html_body || undefined,
-            snippet: m.snippet || '',
-            date: m.email_date
-              ? new Date(m.email_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-              : '',
-            timestamp: m.email_date || m.timestamp || new Date().toISOString(),
-            read: m.read ?? true,
-            starred: m.starred ?? false,
-            labels: m.labels || [],
-            folder: (m.folder as Email['folder']) || 'inbox',
-            attachments: m.attachments || [],
-            isUrgent: m.is_urgent || m.isUrgent || false,
-          }))
+          const existingEmails = get().emails
+          const emails: Email[] = raw.map((m: any) => {
+            const existing = existingEmails.find(e => e.id === (m.gmail_id || m.id))
+            const base: Email = {
+              id: m.gmail_id || m.id || String(Math.random()),
+              from: m.from_name || m.from_email || m.from || '(Expéditeur inconnu)',
+              fromEmail: m.from_email || m.fromEmail || '',
+              to: m.to_email || m.to || '',
+              subject: m.subject || '(Sans objet)',
+              body: m.body || m.snippet || '',
+              htmlBody: m.html_body || undefined,
+              snippet: m.snippet || '',
+              date: m.email_date
+                ? new Date(m.email_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+                : '',
+              timestamp: m.email_date || m.timestamp || new Date().toISOString(),
+              read: m.read ?? true,
+              starred: m.starred ?? false,
+              labels: m.labels || [],
+              folder: (m.folder as Email['folder']) || 'inbox',
+              attachments: m.attachments || [],
+              isUrgent: m.is_urgent || m.isUrgent || false,
+            }
+            // Preserve already-loaded detail so an open email keeps its rich design
+            if (existing?.fullLoaded) {
+              return {
+                ...base,
+                htmlBody: existing.htmlBody ?? base.htmlBody,
+                body: existing.body || base.body,
+                attachments: existing.attachments?.length ? existing.attachments : base.attachments,
+                summary: existing.summary,
+                fullLoaded: true,
+              }
+            }
+            return base
+          })
           set({ emails, lastSync: new Date().toISOString(), syncError: null })
         } catch (error) {
           console.error('[EMAIL] loadEmails network error:', error)

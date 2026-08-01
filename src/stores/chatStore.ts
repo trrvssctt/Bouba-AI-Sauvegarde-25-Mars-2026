@@ -12,6 +12,8 @@ export interface Message {
   isStreaming?: boolean
   suggestions?: string[]
   feedback?: 'up' | 'down'
+  /** true = message d'erreur (agent en échec) — affiché en bulle erreur, jamais comme réponse normale */
+  isError?: boolean
 }
 
 export interface Session {
@@ -22,7 +24,7 @@ export interface Session {
 }
 
 function getAuthHeaders() {
-  const token = localStorage.getItem('auth_token')
+  const token = localStorage.getItem('bouba_auth_token')
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -30,11 +32,11 @@ function getAuthHeaders() {
 }
 
 function getStoredUserId(): string {
-  const token = localStorage.getItem('auth_token')
+  const token = localStorage.getItem('bouba_auth_token')
   if (!token) return 'demo-user'
   try {
     const payload = JSON.parse(atob(token.split('.')[1]))
-    return payload.sub || payload.id || 'demo-user'
+    return payload.sub || payload.userId || payload.id || 'demo-user'
   } catch {
     return 'demo-user'
   }
@@ -45,7 +47,7 @@ interface ChatState {
   currentSessionId: string | null
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void
   updateLastMessage: (content: string) => void
-  finalizeLastMessage: (content: string, suggestions?: string[]) => void
+  finalizeLastMessage: (content: string, suggestions?: string[], meta?: { isError?: boolean; agent?: string }) => void
   setFeedback: (messageId: string, feedback: 'up' | 'down') => void
   clearMessages: () => void
   createNewSession: () => Promise<void>
@@ -212,7 +214,7 @@ export const useChatStore = create<ChatState>()(
           return { sessions: updatedSessions }
         }),
 
-      finalizeLastMessage: (content, suggestions) =>
+      finalizeLastMessage: (content, suggestions, meta) =>
         set((state) => {
           const updatedSessions = state.sessions.map((s) => {
             if (s.id === state.currentSessionId) {
@@ -222,6 +224,8 @@ export const useChatStore = create<ChatState>()(
                 last.content = content
                 last.isStreaming = false
                 last.suggestions = suggestions
+                last.isError = meta?.isError || false
+                if (meta?.agent) last.agent = meta.agent
               }
               return { ...s, messages: newMessages }
             }
@@ -230,7 +234,23 @@ export const useChatStore = create<ChatState>()(
           return { sessions: updatedSessions }
         }),
 
-      setFeedback: (messageId, feedback) =>
+      setFeedback: (messageId, feedback) => {
+        // Persister le retour côté serveur (satisfaction admin) — fire-and-forget
+        const state = get()
+        const session = state.sessions.find(s => s.id === state.currentSessionId)
+        const msg = session?.messages.find(m => m.id === messageId)
+        if (msg && msg.feedback !== feedback) {
+          fetch('/api/feedback', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({
+              rating: feedback,
+              agent: msg.agent || 'general',
+              excerpt: (msg.content || '').slice(0, 300),
+            }),
+          }).catch(() => { /* non bloquant */ })
+        }
         set((state) => {
           const updatedSessions = state.sessions.map((s) => {
             if (s.id === state.currentSessionId) {
@@ -242,7 +262,8 @@ export const useChatStore = create<ChatState>()(
             return s
           })
           return { sessions: updatedSessions }
-        }),
+        })
+      },
 
       clearMessages: () =>
         set((state) => ({
@@ -274,27 +295,31 @@ export const useChatStore = create<ChatState>()(
 
       loadSessionsFromAPI: (apiSessions) =>
         set((state) => {
-          // Merge: keep existing sessions that have messages, add new ones from API
-          const existingIds = new Set(state.sessions.map((s) => s.id))
-          const newFromApi: Session[] = apiSessions
-            .filter((s) => !existingIds.has(s.id))
-            .map((s) => ({
+          // Map locale pour préserver les messages déjà chargés
+          const localById = new Map(state.sessions.map((s) => [s.id, s]))
+
+          const merged: Session[] = apiSessions.map((s) => {
+            const local = localById.get(s.id)
+            return {
               id: s.id,
               title: s.title || 'Conversation',
               lastUpdate: new Date(s.updated_at || s.created_at),
-              messages: [],
-            }))
+              messages: local?.messages ?? [],
+            }
+          })
 
-          const merged = [...state.sessions, ...newFromApi].sort(
+          merged.sort(
             (a, b) =>
               new Date(b.lastUpdate).getTime() - new Date(a.lastUpdate).getTime()
           )
 
-          return {
-            sessions: merged,
-            currentSessionId:
-              state.currentSessionId || (merged.length > 0 ? merged[0].id : null),
-          }
+          // Si le currentSessionId ne figure plus dans les sessions serveur, prendre la première
+          const validCurrentId =
+            merged.some((s) => s.id === state.currentSessionId)
+              ? state.currentSessionId
+              : merged.length > 0 ? merged[0].id : null
+
+          return { sessions: merged, currentSessionId: validCurrentId }
         }),
 
       syncWithAPI: async () => {
@@ -318,6 +343,6 @@ export const useChatStore = create<ChatState>()(
         }
       },
     }),
-    { name: 'bouba-chat-storage-v2' }
+    { name: 'bouba-chat-storage-v3' }
   )
 )

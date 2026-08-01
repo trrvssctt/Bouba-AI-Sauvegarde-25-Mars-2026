@@ -48,14 +48,14 @@ function NotificationInbox() {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200/60 p-6 shadow-sm space-y-4">
+    <div className="glass-card p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-100 rounded-xl">
             <Bell className="w-5 h-5 text-blue-600" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-secondary flex items-center gap-2">
               Mes notifications
               {unreadAppNotifications > 0 && (
                 <span className="text-xs bg-blue-600 text-white font-bold px-2 py-0.5 rounded-full">
@@ -63,7 +63,7 @@ function NotificationInbox() {
                 </span>
               )}
             </h3>
-            <p className="text-sm text-gray-500">Messages envoyés par l'équipe Bouba'ia</p>
+            <p className="text-sm text-muted">Messages envoyés par l'équipe Bouba'ia</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -86,8 +86,8 @@ function NotificationInbox() {
       </div>
 
       {appNotifications.length === 0 ? (
-        <div className="text-center py-10 text-gray-400">
-          <Bell className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+        <div className="text-center py-10 text-muted">
+          <Bell className="w-8 h-8 mx-auto mb-2 text-muted" />
           <p className="text-sm">Aucune notification pour le moment.</p>
         </div>
       ) : (
@@ -100,19 +100,19 @@ function NotificationInbox() {
                 key={n.id}
                 className={cn(
                   'border rounded-xl overflow-hidden transition-colors',
-                  n.isRead ? 'border-gray-100 bg-white' : 'border-blue-200 bg-blue-50/40'
+                  n.isRead ? 'border-border bg-surface' : 'border-blue-200 bg-blue-50/40'
                 )}
               >
                 <button
                   onClick={() => handleExpand(n)}
-                  className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"
+                  className="w-full flex items-center justify-between p-4 text-left hover:bg-background transition-colors"
                 >
                   <div className="flex items-start gap-3 min-w-0">
                     <div className={cn('p-1.5 rounded-lg shrink-0', n.isRead ? 'bg-gray-100' : 'bg-blue-100')}>
                       <Icon className={cn('w-4 h-4', n.isRead ? 'text-gray-400' : 'text-blue-600')} />
                     </div>
                     <div className="min-w-0">
-                      <p className={cn('text-sm leading-snug truncate', n.isRead ? 'text-gray-700 font-normal' : 'text-gray-900 font-semibold')}>
+                      <p className={cn('text-sm leading-snug truncate', n.isRead ? 'text-gray-700 font-normal' : 'text-secondary font-semibold')}>
                         {n.subject || n.body.slice(0, 80)}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
@@ -134,13 +134,13 @@ function NotificationInbox() {
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden"
                     >
-                      <div className="px-4 pb-4 border-t border-gray-100">
+                      <div className="px-4 pb-4 border-t border-border">
                         {n.subject && (
                           <p className="text-xs text-gray-500 mt-3 mb-1">
                             <span className="font-semibold">Sujet :</span> {n.subject}
                           </p>
                         )}
-                        <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap mt-3">
+                        <p className="text-sm text-secondary leading-relaxed whitespace-pre-wrap mt-3">
                           {n.body}
                         </p>
                       </div>
@@ -208,7 +208,7 @@ export default function NotificationsPage() {
         animate={{ opacity: 1, y: 0 }}
         className="space-y-2"
       >
-        <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-blue-800 bg-clip-text text-transparent flex items-center">
+        <h2 className="text-3xl font-bold text-secondary flex items-center">
           <Bell className="w-8 h-8 mr-3 text-blue-600" />
           Notifications
         </h2>
@@ -271,7 +271,7 @@ export default function NotificationsPage() {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.2 }}
-        className="bg-white rounded-2xl border border-gray-200/60 p-6 shadow-sm"
+        className="glass-card p-6"
       >
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center space-x-3">
@@ -279,7 +279,7 @@ export default function NotificationsPage() {
               <Mail className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Notifications par email</h3>
+              <h3 className="text-lg font-semibold text-secondary">Notifications par email</h3>
               <p className="text-sm text-gray-600">Envoyer à {user?.email || 'votre adresse email'}</p>
             </div>
           </div>
@@ -328,7 +328,7 @@ export default function NotificationsPage() {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.3 }}
-        className="bg-white rounded-2xl border border-gray-200/60 p-6 shadow-sm"
+        className="glass-card p-6"
       >
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center space-x-3">
@@ -385,7 +385,7 @@ export default function NotificationsPage() {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.4 }}
-        className="bg-white rounded-2xl border border-gray-200/60 p-6 shadow-sm"
+        className="glass-card p-6"
       >
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center space-x-3">
