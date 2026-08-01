@@ -11,11 +11,12 @@ function getAuthHeaders() {
   }
 }
 
+// Champs id/titre/début/fin uniquement, max 30 événements (mission 3.3 — lenteur = tokens)
 function formatEventsForContext(events: CalendarEvent[]): string {
   if (!events.length) return 'Aucun événement.'
   return events
-    .slice(0, 20)
-    .map(e => `- "${e.title}" le ${e.start}${e.end ? ` → ${e.end}` : ''}${e.location ? ` @ ${e.location}` : ''}`)
+    .slice(0, 30)
+    .map(e => `- [ID:${e.id}] "${e.title}" ${e.start}${e.end ? ` → ${e.end}` : ''}`)
     .join('\n')
 }
 
@@ -35,13 +36,31 @@ export function useCalendarAI() {
       setIsProcessing(true)
       try {
         const today = new Date().toISOString()
+        const now = new Date()
+        // Fenêtre pertinente uniquement : aujourd'hui −7 jours → +30 jours (mission 3.3)
+        const windowStart = new Date(now.getTime() - 7 * 24 * 3600000)
+        const windowEnd = new Date(now.getTime() + 30 * 24 * 3600000)
+        const relevantEvents = events.filter(e => {
+          const start = new Date(e.start)
+          return start >= windowStart && start <= windowEnd
+        })
+
+        const instructions = [
+          `INSTRUCTIONS IMPORTANTES: Pour toute commande calendrier, réponds UNIQUEMENT en JSON structuré:`,
+          `- Créer: {"action":"create","eventData":{"title":"...","start":"ISO8601","end":"ISO8601","category":"work|personal|meeting|urgent","location":"...","description":"..."}}`,
+          `- Supprimer: {"action":"delete","eventId":"ID_EXACT","boubaMessage":"message de confirmation"}`,
+          `- Modifier: {"action":"update","eventId":"ID_EXACT","eventData":{"title":"...","start":"ISO8601","end":"ISO8601"},"boubaMessage":"message de confirmation"}`,
+          `- Message seul: {"action":"message","boubaMessage":"ta réponse"}`,
+          `Utilise les IDs exacts des événements listés ci-dessous pour delete/update.`,
+        ].join('\n')
+
         const context = [
+          instructions,
+          ``,
           `[CONTEXTE CALENDRIER]`,
           `Date et heure actuelles : ${today}`,
-          `Événements à venir :`,
-          formatEventsForContext(
-            events.filter(e => new Date(e.start) >= new Date()).slice(0, 10)
-          ),
+          `Événements (fenêtre −7 jours → +30 jours, max 30) :`,
+          formatEventsForContext(relevantEvents),
         ].join('\n')
 
         const result = await callBouba(command, context)
@@ -50,16 +69,19 @@ export function useCalendarAI() {
           return { error: result.error || 'Impossible de traiter la commande.' }
         }
 
-        // Try to parse JSON from Bouba's output (for create actions)
+        // Try to parse JSON from Bouba's output
         const jsonMatch = result.output.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
           try {
             const parsed = JSON.parse(jsonMatch[0])
             if (parsed.action === 'create' && parsed.eventData) {
               const conflicts = checkConflicts(parsed.eventData.start, parsed.eventData.end)
-              return { ...parsed, conflicts, boubaMessage: result.output }
+              return { ...parsed, conflicts, boubaMessage: parsed.boubaMessage || result.output }
             }
-            return { ...parsed, boubaMessage: result.output }
+            if (parsed.action === 'delete' || parsed.action === 'update') {
+              return { ...parsed, boubaMessage: parsed.boubaMessage || result.output }
+            }
+            return { ...parsed, boubaMessage: parsed.boubaMessage || result.output }
           } catch { /* not JSON, return as text */ }
         }
 

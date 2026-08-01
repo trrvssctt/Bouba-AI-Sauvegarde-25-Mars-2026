@@ -26,6 +26,47 @@ export interface GeneratedDocDraft {
   status: 'draft' | 'sent' | 'paid' | 'cancelled'
 }
 
+/**
+ * Valide une transaction extraite d'une réponse IA avant insertion (mission 3.5).
+ * Retourne la transaction normalisée ou une erreur explicite — jamais
+ * d'insertion silencieuse d'une transaction invalide.
+ */
+function validateTransaction(
+  txData: any,
+  fallbackDescription: string,
+  today: string
+): { ok: true; tx: Omit<Transaction, 'id'> } | { ok: false; reason: string } {
+  if (!txData || typeof txData !== 'object') {
+    return { ok: false, reason: 'format inattendu' }
+  }
+  if (txData.type !== 'income' && txData.type !== 'expense') {
+    return { ok: false, reason: `type invalide « ${txData.type ?? '∅'} » (attendu: income ou expense)` }
+  }
+  const amount = Number(txData.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, reason: `montant invalide « ${txData.amount ?? '∅'} »` }
+  }
+  let date = today
+  if (txData.date) {
+    const parsedDate = new Date(txData.date)
+    if (Number.isNaN(parsedDate.getTime())) {
+      return { ok: false, reason: `date invalide « ${txData.date} »` }
+    }
+    date = parsedDate.toISOString().slice(0, 10)
+  }
+  return {
+    ok: true,
+    tx: {
+      type: txData.type,
+      amount,
+      category: typeof txData.category === 'string' && txData.category.trim() ? txData.category : 'Autre',
+      description: typeof txData.description === 'string' && txData.description.trim() ? txData.description : fallbackDescription,
+      date,
+      status: 'completed' as const,
+    } as Omit<Transaction, 'id'>,
+  }
+}
+
 export function useFinanceAI() {
   const [isProcessing, setIsProcessing] = useState(false)
   const transactions = useFinanceStore(state => state.transactions)
@@ -51,26 +92,41 @@ export function useFinanceAI() {
       const result = await callBouba(command, context)
 
       if (result.success) {
-        // Try to parse a transaction from Bouba's response
+        // Priorité 1 : balise [TRANSACTION]{...}[/TRANSACTION] (format structuré n8n)
+        // Regex tolérante + JSON.parse en try/catch + validation stricte des champs.
+        const txTagMatch = result.output.match(/\[TRANSACTION\]([\s\S]*?)\[\/TRANSACTION\]/i)
+        if (txTagMatch) {
+          let txData: any = null
+          try {
+            txData = JSON.parse(txTagMatch[1].trim())
+          } catch {
+            return { success: false, error: 'Bouba a renvoyé une transaction illisible (JSON invalide). Réessayez.' }
+          }
+          const validated = validateTransaction(txData, command, today)
+          if (!validated.ok) {
+            // Transaction invalide → erreur explicite, JAMAIS d'insertion silencieuse
+            return { success: false, error: `Transaction refusée : ${validated.reason}.` }
+          }
+          return {
+            success: true,
+            data: validated.tx,
+            boubaMessage: result.output.replace(/\[TRANSACTION\][\s\S]*?\[\/TRANSACTION\]/i, '').trim(),
+          }
+        }
+
+        // Repli : objet JSON libre avec amount + type dans la réponse
         const jsonMatch = result.output.match(/\{[\s\S]*?\}/)
         if (jsonMatch) {
           try {
             const txData = JSON.parse(jsonMatch[0])
-            if (txData.amount && txData.type) {
-              return {
-                success: true,
-                data: {
-                  type: txData.type as 'income' | 'expense',
-                  amount: Number(txData.amount),
-                  category: txData.category || 'Autre',
-                  description: txData.description || command,
-                  date: txData.date || today,
-                  status: 'completed' as const,
-                } as Omit<Transaction, 'id'>,
-                boubaMessage: result.output,
+            if (txData.amount !== undefined && txData.type !== undefined) {
+              const validated = validateTransaction(txData, command, today)
+              if (!validated.ok) {
+                return { success: false, error: `Transaction refusée : ${validated.reason}.` }
               }
+              return { success: true, data: validated.tx, boubaMessage: result.output }
             }
-          } catch { /* not JSON */ }
+          } catch { /* pas du JSON — réponse conversationnelle normale */ }
         }
         return { success: true, data: null, boubaMessage: result.output }
       }
@@ -93,11 +149,18 @@ export function useFinanceAI() {
       const now = new Date()
       const monthLabel = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
 
-      const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
-      const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+      // Contexte = transactions du MOIS COURANT uniquement, max 50,
+      // champs essentiels (mission 3.5 — lenteur = tokens)
+      const monthPrefix = now.toISOString().slice(0, 7) // "YYYY-MM"
+      const monthTransactions = transactions
+        .filter(t => (t.date || '').startsWith(monthPrefix))
+        .slice(0, 50)
+
+      const income = monthTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+      const expense = monthTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
 
       const topCategories = Object.entries(
-        transactions.reduce((acc, t) => {
+        monthTransactions.reduce((acc, t) => {
           acc[t.category] = (acc[t.category] || 0) + t.amount
           return acc
         }, {} as Record<string, number>)
@@ -108,13 +171,13 @@ export function useFinanceAI() {
 
       const context = [
         `[DONNÉES FINANCIÈRES — ${monthLabel}]`,
-        `Revenus totaux : ${income.toLocaleString('fr-FR')}`,
-        `Dépenses totales : ${expense.toLocaleString('fr-FR')}`,
+        `Revenus du mois : ${income.toLocaleString('fr-FR')}`,
+        `Dépenses du mois : ${expense.toLocaleString('fr-FR')}`,
         `Bénéfice net : ${(income - expense).toLocaleString('fr-FR')}`,
-        `Top catégories : ${topCategories.join(', ')}`,
-        `Dernières transactions :`,
-        transactions.slice(0, 15).map(t =>
-          `- ${t.type === 'income' ? '+' : '-'}${t.amount} | ${t.category} | ${t.description} | ${t.date}`
+        `Top catégories : ${topCategories.join(', ') || 'aucune'}`,
+        `Transactions du mois (${monthTransactions.length}) :`,
+        monthTransactions.map(t =>
+          `- ${t.type === 'income' ? '+' : '-'}${t.amount} | ${t.category} | ${t.date}`
         ).join('\n'),
       ].join('\n')
 
@@ -189,15 +252,39 @@ export function useFinanceAI() {
       const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
       const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
 
+      // > 50 transactions → résumé agrégé par catégorie plutôt que la liste
+      // brute (mission 3.5 — lenteur = tokens)
+      let detailBlock: string
+      if (transactions.length > 50) {
+        const byCategory = transactions.reduce((acc, t) => {
+          const key = `${t.type}:${t.category}`
+          acc[key] = (acc[key] || 0) + t.amount
+          return acc
+        }, {} as Record<string, number>)
+        detailBlock = [
+          `Résumé agrégé par catégorie (${transactions.length} transactions au total) :`,
+          ...Object.entries(byCategory)
+            .sort(([, a], [, b]) => b - a)
+            .map(([key, amt]) => {
+              const [type, category] = key.split(':')
+              return `- [${type}] ${category} : ${amt.toLocaleString('fr-FR')}`
+            }),
+        ].join('\n')
+      } else {
+        detailBlock = [
+          `Transactions (${transactions.length}) :`,
+          ...transactions.slice(0, 50).map(t =>
+            `- [${t.type}] ${t.amount} | ${t.category} | ${t.date}`
+          ),
+        ].join('\n')
+      }
+
       const context = [
-        '[DONNÉES FINANCIÈRES COMPLÈTES]',
+        '[DONNÉES FINANCIÈRES]',
         `Revenus totaux : ${income.toLocaleString('fr-FR')}`,
         `Dépenses totales : ${expense.toLocaleString('fr-FR')}`,
         `Bénéfice : ${(income - expense).toLocaleString('fr-FR')}`,
-        `Transactions (${transactions.length} au total) :`,
-        transactions.slice(0, 30).map(t =>
-          `- [${t.type}] ${t.amount} | ${t.category} | ${t.description} | ${t.date} | ${t.status}`
-        ).join('\n'),
+        detailBlock,
       ].join('\n')
 
       const result = await callBouba(question, context)

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Send, Mic, MicOff } from 'lucide-react'
 import { useBouba } from '@/src/hooks/useBouba'
 import { useAuth } from '@/src/hooks/useAuth'
@@ -15,11 +15,13 @@ const QUICK_PROMPTS_DEFAULT = [
   'Ajoute une dépense',
 ]
 
+// Bouba admin reçoit les stats business en direct (admin_context injecté par
+// le backend) : ces prompts sont réellement répondables.
 const QUICK_PROMPTS_ADMIN = [
-  'Liste les utilisateurs en impayé depuis plus de 3 jours',
-  'Analyse les logs d\'erreurs de cette semaine',
-  'Donne-moi le MRR et les KPIs de croissance',
-  'Rédige un message broadcast pour annoncer la sortie du module Contacts',
+  'Donne-moi le MRR et les utilisateurs actifs',
+  'Y a-t-il des paiements ou upgrades à valider ?',
+  'Quelle est la santé de l\'IA aujourd\'hui (erreurs, latence) ?',
+  'Rédige une annonce pour présenter une nouvelle fonctionnalité',
 ]
 
 export default function BoubaWidget({ source }: { source?: string } = {}) {
@@ -38,6 +40,12 @@ export default function BoubaWidget({ source }: { source?: string } = {}) {
 
   const currentSession = sessions.find((s) => s.id === currentSessionId)
   const messages = currentSession?.messages.slice(-8) || []
+
+  // Callback stable : ne casse pas le memo des MessageBubble à chaque frappe
+  const handleSuggestionClick = useCallback((s: string) => {
+    setInput(s)
+    inputRef.current?.focus()
+  }, [])
 
   // Sync quota from server each time the widget opens (non-admin only)
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin'
@@ -130,7 +138,7 @@ export default function BoubaWidget({ source }: { source?: string } = {}) {
   return (
     <>
       {/* Floating button */}
-      <div className="fixed bottom-20 right-4 lg:bottom-8 lg:right-8 z-40 flex flex-col items-center gap-1.5">
+      <div className="fixed bottom-24 right-4 lg:bottom-8 lg:right-8 z-40 flex flex-col items-center gap-1.5 safe-area-pb">
         <AnimatePresence>
           {!isOpen && (
             <motion.div
@@ -173,7 +181,7 @@ export default function BoubaWidget({ source }: { source?: string } = {}) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.95 }}
             transition={{ duration: 0.18 }}
-            className="fixed bottom-40 lg:bottom-32 right-4 lg:right-8 w-[calc(100vw-2rem)] sm:w-96 max-h-[520px] bg-surface border border-border rounded-3xl shadow-2xl flex flex-col z-40 overflow-hidden"
+            className="fixed bottom-44 lg:bottom-32 right-4 lg:right-8 w-[calc(100vw-2rem)] sm:w-96 max-h-[520px] bg-surface border border-border rounded-3xl shadow-2xl flex flex-col z-40 overflow-hidden safe-area-pb"
           >
             {/* Header */}
             <div className="bg-gradient-to-r from-primary to-violet-600 text-white px-4 py-3 flex items-center justify-between">
@@ -230,10 +238,7 @@ export default function BoubaWidget({ source }: { source?: string } = {}) {
                   <MessageBubble
                     key={msg.id}
                     {...msg}
-                    onSuggestionClick={(s) => {
-                      setInput(s)
-                      inputRef.current?.focus()
-                    }}
+                    onSuggestionClick={handleSuggestionClick}
                   />
                 ))
               )}

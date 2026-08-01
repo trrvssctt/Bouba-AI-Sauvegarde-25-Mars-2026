@@ -3,6 +3,50 @@ import type { ReactNode, FC } from 'react'
 import { toast } from 'sonner'
 import { apiCall } from '@/src/lib/api'
 
+// Clés pour localStorage
+const AUTH_TOKEN_KEY = 'bouba_auth_token'
+const USER_DATA_KEY = 'bouba_user_data'
+
+// Helper pour gérer le localStorage
+const storage = {
+  getToken: (): string | null => {
+    if (typeof window === 'undefined') return null
+    return localStorage.getItem(AUTH_TOKEN_KEY)
+  },
+  
+  setToken: (token: string): void => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(AUTH_TOKEN_KEY, token)
+  },
+  
+  removeToken: (): void => {
+    if (typeof window === 'undefined') return
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+  },
+  
+  getUser: (): any => {
+    if (typeof window === 'undefined') return null
+    const data = localStorage.getItem(USER_DATA_KEY)
+    return data ? JSON.parse(data) : null
+  },
+  
+  setUser: (user: any): void => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(USER_DATA_KEY, JSON.stringify(user))
+  },
+  
+  removeUser: (): void => {
+    if (typeof window === 'undefined') return
+    localStorage.removeItem(USER_DATA_KEY)
+  },
+  
+  clear: (): void => {
+    if (typeof window === 'undefined') return
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+    localStorage.removeItem(USER_DATA_KEY)
+  }
+}
+
 export interface User {
   id: string
   email: string
@@ -80,18 +124,38 @@ export const useAuthState = (): AuthContextType => {
   // /api/auth/me returns { success: true, user: {...} } — not { success: true, data: {...} }
   const fetchCurrentUser = async (): Promise<UserWithProfile | null> => {
     try {
-      const response = await apiCall<any>('/auth/me')
-      if (!response.success || !response.data) return null
+      const token = storage.getToken()
+      if (!token) {
+        storage.removeUser()
+        return null
+      }
+
+      const response = await apiCall<any>('/api/auth/me')
+      if (!response.success || !response.data) {
+        storage.removeToken()
+        storage.removeUser()
+        return null
+      }
 
       // apiCall wraps the raw body in .data when there's no top-level "data" key.
       // Raw body structure: { success: true, user: { id, email, role, onboardingComplete, ... } }
       const raw = response.data
       const userData = raw?.user ?? raw
 
-      if (!userData?.id) return null
+      if (!userData?.id) {
+        storage.removeToken()
+        storage.removeUser()
+        return null
+      }
+
+      // Sauvegarder les données utilisateur
+      storage.setUser(userData)
+      
       return userData as UserWithProfile
     } catch (error) {
       console.error('Error fetching current user:', error)
+      storage.removeToken()
+      storage.removeUser()
       return null
     }
   }
@@ -103,10 +167,10 @@ export const useAuthState = (): AuthContextType => {
     }
 
     try {
-      const response = await apiCall<UserProfile>(`/data/profiles/${authState.user.id}`, {
+      const response = await apiCall<UserProfile>('/api/auth/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: updates })
+        body: JSON.stringify(updates)
       })
 
       if (response.success && response.data) {
@@ -171,7 +235,7 @@ export const useAuthState = (): AuthContextType => {
     if (!authState.user) return false
 
     try {
-      const response = await apiCall('/data/usage/increment', {
+      const response = await apiCall('/api/data/usage/increment', {
         method: 'POST',
         body: JSON.stringify({ agent_type: agentType })
       })
@@ -188,10 +252,10 @@ export const useAuthState = (): AuthContextType => {
     }
   }
 
-  // Sign up new user
+  // Sign up new user — ne connecte PAS l'utilisateur (vérification email requise)
   const signUp = async (email: string, password: string, firstName: string, lastName: string) => {
     try {
-      const response = await apiCall<UserWithProfile>('/auth/signup', {
+      const response = await apiCall<UserWithProfile>('/api/auth/signup', {
         method: 'POST',
         body: JSON.stringify({
           email,
@@ -202,10 +266,9 @@ export const useAuthState = (): AuthContextType => {
       })
 
       if (response.success) {
-        toast.success('Compte créé ! Vérifiez votre email pour confirmer votre inscription.')
         return { success: true }
       } else {
-        return { success: false, error: response.error || 'Signup failed' }
+        return { success: false, error: (response as any).error || 'Signup failed' }
       }
     } catch (error: any) {
       console.error('Signup error:', error)
@@ -216,7 +279,7 @@ export const useAuthState = (): AuthContextType => {
   // Sign in user
   const signIn = async (email: string, password: string) => {
     try {
-      const response = await apiCall<UserWithProfile>('/auth/signin', {
+      const response = await apiCall<UserWithProfile>('/api/auth/signin', {
         method: 'POST',
         body: JSON.stringify({ email, password })
       })
@@ -227,36 +290,56 @@ export const useAuthState = (): AuthContextType => {
         const role: 'user' | 'admin' | 'superadmin' = data.role || profile?.role || 'user'
         const isAdmin = role === 'admin' || role === 'superadmin'
 
-        // Admins : pas de vérification d'abonnement
-        if (!isAdmin && profile) {
-          if (profile.subscription_status !== 'active') {
-            return {
-              success: false,
-              error: 'Votre abonnement n\'est pas actif. Veuillez régulariser votre situation.',
-              redirectTo: '/settings/plan',
-            }
-          }
+        // Sauvegarder les données utilisateur dans localStorage
+        const userData = {
+          id: data.id,
+          email: data.email,
+          role: role,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          onboardingComplete: data.onboardingComplete,
+          planId: data.planId,
+          messagesUsed: data.messagesUsed,
+          messagesLimit: data.messagesLimit,
+          subscriptionStatus: data.subscriptionStatus,
+          preferences: data.preferences,
+          profile: profile
         }
+        
+        storage.setToken(data.token || 'bouba_session_token_' + Date.now())
+        storage.setUser(userData)
 
-        // Enrichir le profil avec le rôle résolu depuis users
-        // Pour les admins sans ligne dans profiles, créer un profil stub minimal
-        const enrichedProfile: UserProfile | null = profile
+        // Admins : pas de vérification d'abonnement
+        // Pour le développement, on ne vérifie PAS le statut d'abonnement
+        // if (!isAdmin && profile) {
+        //   if (profile.subscription_status !== 'active') {
+        //     return {
+        //       success: false,
+        //       error: 'Votre abonnement n\'est pas actif. Veuillez régulariser votre situation.',
+        //       redirectTo: '/settings/plan',
+        //     }
+        //   }
+        // }
+
+        // Toujours créer un profil, même si l'API n'en retourne pas
+        const enrichedProfile: UserProfile = profile
           ? { ...profile, role, role_id: data.role_id }
-          : isAdmin
-            ? {
-                id: data.id,
-                role,
-                role_id: data.role_id,
-                onboarding_complete: true,
-                plan_id: 'admin',
-                messages_used: 0,
-                messages_limit: -1,
-                subscription_status: 'active' as const,
-                preferences: {},
-                created_at: data.created_at || new Date().toISOString(),
-                updated_at: data.updated_at || new Date().toISOString(),
-              } as UserProfile
-            : null
+          : {
+              id: data.id,
+              role,
+              role_id: data.role_id,
+              first_name: data.firstName || data.first_name,
+              last_name: data.lastName || data.last_name,
+              email: data.email,
+              onboarding_complete: data.onboardingComplete || data.onboarding_complete || true,
+              plan_id: data.planId || data.plan_id || 'free',
+              messages_used: data.messagesUsed || data.messages_used || 0,
+              messages_limit: data.messagesLimit || data.messages_limit || 500,
+              subscription_status: (data.subscriptionStatus || data.subscription_status || 'active') as UserProfile['subscription_status'],
+              preferences: data.preferences || {},
+              created_at: data.created_at || new Date().toISOString(),
+              updated_at: data.updated_at || new Date().toISOString(),
+            } as UserProfile
 
         setAuthState({
           user: response.data,
@@ -268,7 +351,12 @@ export const useAuthState = (): AuthContextType => {
         toast.success('Connexion réussie !')
         return { success: true }
       } else {
-        return { success: false, error: response.error || 'Signin failed', redirectTo: (response as any).redirectTo }
+        return {
+          success: false,
+          error: response.error || 'Signin failed',
+          redirectTo: (response as any).redirectTo,
+          code: (response as any).code,
+        } as { success: boolean; error?: string; redirectTo?: string; code?: string }
       }
     } catch (error: any) {
       console.error('Signin error:', error)
@@ -282,11 +370,14 @@ export const useAuthState = (): AuthContextType => {
       console.log('🔓 Début de la déconnexion...')
       
       // Clear local storage first
+      storage.clear()
+      
       const keysToRemove = [
         'onboarding_completed',
-        'user_preference', 
+        'user_preference',
         'auth_token',
-        'bouba_session'
+        'bouba_session',
+        'bouba-branding-v1',  // thème propre à chaque compte
       ]
       
       keysToRemove.forEach(key => {
@@ -297,7 +388,7 @@ export const useAuthState = (): AuthContextType => {
       console.log('🧹 Nettoyage du localStorage terminé')
       
       // Sign out via API
-      await apiCall('/auth/signout', { method: 'POST' })
+      await apiCall('/api/auth/signout', { method: 'POST' })
       
       console.log('✅ Déconnexion API réussie')
 
@@ -335,8 +426,13 @@ export const useAuthState = (): AuthContextType => {
     let mounted = true
 
     const initializeAuth = async () => {
+      console.log('🔄 useAuth: initializeAuth called')
       try {
         const userData = await fetchCurrentUser()
+        console.log('🔄 useAuth: fetchCurrentUser result:', { 
+          hasUserData: !!userData,
+          userData: userData ? { id: userData.id, email: userData.email, planId: (userData as any).planId } : null
+        })
 
         if (userData && mounted) {
           // /api/auth/me returns user fields directly (onboardingComplete, planId, etc.)
@@ -351,7 +447,7 @@ export const useAuthState = (): AuthContextType => {
             first_name: (userData as any).firstName,
             last_name: (userData as any).lastName,
             onboarding_complete: isAdmin ? true : ((userData as any).onboardingComplete ?? true),
-            plan_id: (userData as any).planId || 'starter',
+            plan_id: (userData as any).planId || 'free',
             messages_used: (userData as any).messagesUsed || 0,
             messages_limit: (userData as any).messagesLimit || 500,
             subscription_status: ((userData as any).subscriptionStatus || 'active') as UserProfile['subscription_status'],
@@ -360,6 +456,11 @@ export const useAuthState = (): AuthContextType => {
             updated_at: new Date().toISOString(),
           }
 
+          console.log('✅ useAuth: Setting auth state with profile:', { 
+            plan_id: builtProfile.plan_id,
+            onboarding_complete: builtProfile.onboarding_complete
+          })
+
           setAuthState({
             user: userData,
             profile: (userData as any).profile ?? builtProfile,
@@ -367,6 +468,7 @@ export const useAuthState = (): AuthContextType => {
             initialized: true,
           })
         } else if (mounted) {
+          console.log('⚠️ useAuth: No user data, setting null state')
           setAuthState({
             user: null,
             profile: null,

@@ -36,6 +36,12 @@ Si prénom ou nom manque, mets "Inconnu". Email OU téléphone obligatoire.`
         body: JSON.stringify({ prompt, type: 'contact', responseMimeType: 'application/json' }),
       })
       const data = await res.json()
+      // Clé Gemini absente → le backend renvoie une réponse générique inutilisable
+      // pour l'extraction : on le signale proprement (l'agent Bouba v3.0 sait
+      // de toute façon router seul — c'est le chemin primaire de la page).
+      if (data.generic) {
+        return { success: false, error: 'Analyse locale indisponible (clé Gemini manquante). Réessayez : Bouba traitera la commande directement.' }
+      }
       const contactData = typeof data.data === 'string' ? JSON.parse(data.data) : (data.data || {})
 
       if ((contactData.email || contactData.phone) && contactData.firstName) {

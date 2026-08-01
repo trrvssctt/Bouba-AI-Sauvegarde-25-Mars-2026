@@ -4,27 +4,13 @@ import { useAuth } from './useAuth'
 import { useContactStore } from '@/src/stores/contactStore'
 import { useEmailStore } from '@/src/stores/emailStore'
 import { useNotificationStore } from '@/src/stores/notificationStore'
+import {
+  parseBoubaApiResponse,
+  extractEmbeddedSuggestions,
+  parseActionTokens,
+  type BoubaAction,
+} from '@/src/lib/boubaResponse'
 import { toast } from 'sonner'
-
-/**
- * Parse [ACTION:TYPE key="value" ...] tokens from AI response.
- * Returns the cleaned text (actions stripped) and list of action objects.
- */
-function parseActions(text: string): { cleanText: string; actions: Array<{ type: string; params: Record<string, string> }> } {
-  const actionRegex = /\[ACTION:(\w+)((?:\s+\w+="[^"]*")*)\]/g
-  const actions: Array<{ type: string; params: Record<string, string> }> = []
-  const cleanText = text.replace(actionRegex, (_match, type: string, paramsStr: string) => {
-    const params: Record<string, string> = {}
-    const paramRegex = /(\w+)="([^"]*)"/g
-    let m: RegExpExecArray | null
-    while ((m = paramRegex.exec(paramsStr)) !== null) {
-      params[m[1]] = m[2]
-    }
-    actions.push({ type, params })
-    return ''
-  }).trim()
-  return { cleanText, actions }
-}
 
 export function useBouba(source?: string) {
   const [isLoading, setIsLoading] = useState(false)
@@ -35,7 +21,6 @@ export function useBouba(source?: string) {
     finalizeLastMessage,
     sessions,
     currentSessionId,
-    setCurrentSessionId,
     updateSessionId,
   } = useChatStore()
   const { user, profile, incrementLocalUsage } = useAuth()
@@ -47,13 +32,14 @@ export function useBouba(source?: string) {
     addMessage({ role: 'user', content: chatInput })
     addMessage({ role: 'assistant', content: '', isStreaming: true })
 
-    // 60-second timeout — Bouba has at most 1 minute to respond
+    // Timeout 60 s — Bouba a au plus 1 minute (le backend coupe à 50 s)
     const controller = new AbortController()
     const timeoutHandle = setTimeout(() => controller.abort(), 60_000)
 
     try {
       const currentSession = sessions.find(s => s.id === currentSessionId)
-      const history = currentSession?.messages.slice(-10) || []
+      // 6 derniers messages : aligné avec le plafond backend (mission 1.6)
+      const history = currentSession?.messages.slice(-6) || []
 
       const isValidUUID = (id: string | null) => {
         if (!id) return false
@@ -73,90 +59,68 @@ export function useBouba(source?: string) {
           sessionId: finalSessionId,
           conversation_id: finalSessionId,
           tokens_used: 0,
-          source: source || 'dashboard',
+          source: source || 'direct',
           history: history.map(m => ({ role: m.role, content: m.content })),
         })
       })
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-
         if (response.status === 429) {
           finalizeLastMessage(
             '⚠️ **Limite de messages atteinte**\n\nVous avez utilisé tous vos messages pour ce mois. [Mettez à niveau votre plan](/settings/plan) pour continuer.',
-            ['Voir les plans']
+            ['Voir les plans'],
+            { isError: true }
           )
           return
         }
-
+        const errorData = await response.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP ${response.status}`)
       }
 
-      const data = await response.json()
-      if (!data.success) throw new Error(data.error || 'Erreur API')
+      // Réponse déjà normalisée par le backend : on lit success + output, point.
+      const data = parseBoubaApiResponse(await response.json())
 
-      // If server assigned a new sessionId, rename local session to match
+      // Si le serveur a assigné un nouveau sessionId, renommer la session locale
       if (data.sessionId && data.sessionId !== currentSessionId) {
         updateSessionId(currentSessionId, data.sessionId)
       }
 
-      const responseData = data.data
-      let fullResponse = ''
-      let suggestions: string[] = []
+      setActiveAgent(data.agent ? data.agent.toUpperCase() : null)
 
-      if (typeof responseData === 'string') {
-        fullResponse = responseData
-      } else {
-        fullResponse = responseData?.output || responseData?.message || responseData?.text || responseData?.response || JSON.stringify(responseData)
-        suggestions = responseData?.suggestions || []
+      // Agent en échec → bulle d'erreur distincte, JAMAIS une réponse normale
+      if (!data.success) {
+        finalizeLastMessage(data.output, ['Réessayer'], { isError: true, agent: data.agent })
+        return
       }
 
-      // Detect active agent
-      const agentName = responseData?.agent?.toUpperCase()
-      if (agentName) {
-        setActiveAgent(agentName)
-      } else {
-        const lower = fullResponse.toLowerCase()
-        if (lower.includes('email') || lower.includes('mail')) setActiveAgent('EMAIL')
-        else if (lower.includes('calendar') || lower.includes('rendez-vous')) setActiveAgent('CALENDAR')
-        else if (lower.includes('contact')) setActiveAgent('CONTACT')
-        else if (lower.includes('finance') || lower.includes('dépense')) setActiveAgent('FINANCE')
+      // Suggestions embarquées dans le texte (---SUGGESTIONS--- tolérant)
+      const embedded = extractEmbeddedSuggestions(data.output)
+      let visibleText = embedded.visibleText
+      const suggestions = data.suggestions.length > 0 ? data.suggestions : embedded.suggestions
+
+      // Actions structurées renvoyées par le backend (mode démo notamment)
+      if (data.actions.length > 0) {
+        await executeBackendActions(data.actions)
       }
 
-      // Handle embedded suggestions
-      let visibleText = fullResponse.trim()
-      if (fullResponse.includes('---SUGGESTIONS---')) {
-        const parts = fullResponse.split('---SUGGESTIONS---')
-        visibleText = parts[0].trim()
-        try {
-          suggestions = JSON.parse(parts[1].trim())
-        } catch {}
-      }
-
-      // Execute structured actions from backend (simulatedResponse.actions array)
-      const backendActions: Array<{ type: string; payload?: any }> = responseData?.actions || []
-      if (backendActions.length > 0) {
-        await executeBackendActions(backendActions)
-      }
-
-      // Parse and execute [ACTION:...] tokens from response text
-      const { cleanText, actions } = parseActions(visibleText)
+      // Balises [ACTION:...] dans le texte (tolérant : échec = toast, texte affiché quand même)
+      const { cleanText, actions } = parseActionTokens(visibleText)
       if (actions.length > 0) {
         visibleText = cleanText
-        await executeActions(actions, chatInput)
+        await executeActions(actions)
       }
 
-      finalizeLastMessage(visibleText || fullResponse.trim(), suggestions)
+      finalizeLastMessage(visibleText || data.output, suggestions, { agent: data.agent })
 
       // Mettre à jour le quota localement (non admin)
       const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin'
       if (!isAdmin) incrementLocalUsage()
 
-      // Notify if user is away from chat or tab is hidden
+      // Notifier si l'utilisateur n'est pas sur le chat ou si l'onglet est masqué
       if (document.hidden || window.location.pathname !== '/dashboard') {
         const notifStore = useNotificationStore.getState()
         notifStore.incrementUnreadMessages()
-        notifStore.notifyBoubaReply(visibleText || fullResponse.trim())
+        notifStore.notifyBoubaReply(visibleText || data.output)
       }
 
     } catch (error) {
@@ -168,6 +132,7 @@ export function useBouba(source?: string) {
       const isAbort = error instanceof Error && error.name === 'AbortError'
 
       if (isAbort) {
+        // Timeout : message distinct de l'erreur serveur (mission 2.1)
         userMessage = '⏱️ **Bouba met trop de temps à répondre**\n\nLa requête a dépassé 60 secondes. Cela peut arriver lors d\'une tâche complexe. Réessaie dans quelques instants ou reformule ta demande.'
       } else if (errStr.includes('Failed to fetch') || errStr.includes('NetworkError')) {
         userMessage = '🌐 **Problème de connexion**\n\nVérifiez votre connexion internet et réessayez.'
@@ -177,41 +142,44 @@ export function useBouba(source?: string) {
         userMessage = '🔧 **Erreur serveur**\n\nUne erreur est survenue côté serveur. Réessayez dans quelques instants.'
       }
 
-      finalizeLastMessage(userMessage, ['Réessayer'])
+      finalizeLastMessage(userMessage, ['Réessayer'], { isError: true })
     } finally {
       clearTimeout(timeoutHandle)
       setIsLoading(false)
-      setActiveAgent(null)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, addMessage, updateLastMessage, finalizeLastMessage, sessions, currentSessionId, setCurrentSessionId, updateSessionId, user])
+  }, [isLoading, addMessage, updateLastMessage, finalizeLastMessage, sessions, currentSessionId, updateSessionId, user, source])
 
   /**
-   * Execute structured actions returned directly from backend (actions array)
+   * Actions structurées renvoyées par le backend (tableau actions)
    */
-  const executeBackendActions = useCallback(async (actions: Array<{ type: string; payload?: any }>) => {
+  const executeBackendActions = useCallback(async (actions: BoubaAction[]) => {
     for (const action of actions) {
-      if (action.type === 'RELOAD_CONTACTS') {
-        useContactStore.getState().loadFromDB()
-      }
-      if (action.type === 'NAVIGATE' && action.payload) {
-        // Soft navigate via history.pushState so the router picks it up
-        window.history.pushState({}, '', action.payload)
-        window.dispatchEvent(new PopStateEvent('popstate'))
-      }
-      if (action.type === 'OPEN_COMPOSE' && action.payload) {
-        // Emit custom event that EmailPage can listen to
-        window.dispatchEvent(new CustomEvent('bouba:compose', { detail: action.payload }))
+      try {
+        if (action.type === 'RELOAD_CONTACTS') {
+          useContactStore.getState().loadFromDB()
+        }
+        if (action.type === 'NAVIGATE' && action.payload) {
+          // Soft navigate via history.pushState so the router picks it up
+          window.history.pushState({}, '', action.payload)
+          window.dispatchEvent(new PopStateEvent('popstate'))
+        }
+        if (action.type === 'OPEN_COMPOSE' && action.payload) {
+          // Emit custom event that EmailPage can listen to
+          window.dispatchEvent(new CustomEvent('bouba:compose', { detail: action.payload }))
+        }
+      } catch (err) {
+        console.warn('[CHAT] Action backend ignorée:', action.type, err)
       }
     }
   }, [])
 
   /**
-   * Execute parsed actions: CREATE_CONTACT, SEND_EMAIL
+   * Balises [ACTION:...] : CREATE_CONTACT, SEND_EMAIL.
+   * Un échec d'action n'empêche jamais l'affichage de la réponse.
    */
   const executeActions = useCallback(async (
-    actions: Array<{ type: string; params: Record<string, string> }>,
-    _originalInput: string
+    actions: Array<{ type: string; params: Record<string, string> }>
   ) => {
     for (const action of actions) {
       if (action.type === 'CREATE_CONTACT') {
@@ -238,6 +206,7 @@ export function useBouba(source?: string) {
           })
           toast.success(`Contact "${name || email}" créé par Bouba`)
         } catch (err) {
+          console.warn('[CHAT] CREATE_CONTACT échoué:', err)
           toast.error("Échec création contact")
         }
       }
@@ -256,6 +225,7 @@ export function useBouba(source?: string) {
             toast.error(result.error || "Échec envoi email")
           }
         } catch (err) {
+          console.warn('[CHAT] SEND_EMAIL échoué:', err)
           toast.error("Erreur lors de l'envoi de l'email")
         }
       }

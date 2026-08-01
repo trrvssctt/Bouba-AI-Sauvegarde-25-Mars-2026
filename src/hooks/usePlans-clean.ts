@@ -52,15 +52,15 @@ export const usePlans = () => {
       id: 'starter',
       name: 'Bouba Starter',
       description: 'Pour les freelances et petites équipes',
-      price: 2900, // 29€ en centimes pour Stripe
+      price: 990, // 9.90€ en centimes pour Stripe
       currency: 'EUR',
       billing_interval: 'monthly' as const,
       trial_days: 7,
       agents_limit: 2,
       messages_limit: 10000,
-      features: ['Chat IA (10 000 messages/mois)', 'Email', 'Contacts', 'Calendrier'],
-      limits: {
-        agents: 2,
+      features: ['Chat IA (10,000 messages/mois)', 'Email', 'Contacts', 'Calendrier'],
+      limits: { 
+        agents: 2, 
         messages: 10000,
         emails: 1000,
         contacts: 500,
@@ -76,15 +76,15 @@ export const usePlans = () => {
       id: 'business',
       name: 'Bouba Business',
       description: 'Solution complète pour les entreprises',
-      price: 9900, // 99€ en centimes pour Stripe
+      price: 2999, // 29.99€ en centimes pour Stripe
       currency: 'EUR',
       billing_interval: 'monthly' as const,
       trial_days: 14,
       agents_limit: 5,
       messages_limit: -1,
-      features: ['Chat IA illimité', 'Email', 'Contacts', 'Calendrier', 'Finance & documents', 'API Access'],
-      limits: {
-        agents: 5,
+      features: ['Chat IA (illimité)', 'Email', 'Contacts', 'Calendrier', 'Finance avec documents', 'API Access'],
+      limits: { 
+        agents: 5, 
         messages: -1,
         emails: 5000,
         contacts: 2000,
@@ -96,33 +96,6 @@ export const usePlans = () => {
       popular: false,
       active: true,
       created_at: new Date().toISOString()
-    },
-    {
-      id: 'enterprise',
-      name: 'Bouba Enterprise',
-      description: 'Solution sur-mesure pour les grandes entreprises',
-      price: 29900, // 299€ en centimes pour Stripe
-      currency: 'EUR',
-      billing_interval: 'monthly' as const,
-      trial_days: 14,
-      agents_limit: -1,
-      messages_limit: -1,
-      features: ['Chat IA illimité', 'Email', 'Contacts', 'Calendrier', 'Finance & documents', 'API Access', 'White-label', 'Support dédié'],
-      limits: {
-        agents: -1,
-        messages: -1,
-        emails: -1,
-        contacts: -1,
-        calendar: true,
-        finance: true,
-        api_access: true,
-        white_label: true,
-        web_search: true
-      },
-      stripe_price_id: 'price_enterprise_monthly',
-      popular: false,
-      active: true,
-      created_at: new Date().toISOString()
     }
   ];
   
@@ -131,7 +104,7 @@ export const usePlans = () => {
   const [loading, setLoading] = useState(false)
   const { user, profile } = useAuth()
 
-  // Fetch available plans via API - AVEC FALLBACK ROBUSTE
+  // Fetch available plans via API
   const fetchPlans = async () => {
     try {
       console.log('🔄 usePlans: Fetching plans from API...')
@@ -139,34 +112,18 @@ export const usePlans = () => {
       
       console.log('📦 usePlans: API Response:', response)
       
-      // TOUJOURS garder les plans par défaut comme fallback
-      let plansToSet = [...defaultPlans];
-      
       if (response.success && response.data && Array.isArray(response.data) && response.data.length > 0) {
-        console.log('✅ usePlans: API returned', response.data.length, 'plans')
-        // Fusionner les données API avec les plans par défaut
-        plansToSet = response.data.map(apiPlan => {
-          const defaultPlan = defaultPlans.find(p => p.id === apiPlan.id);
-          return {
-            ...defaultPlan, // Garder les valeurs par défaut
-            ...apiPlan,     // Surcharger avec les données API
-            // S'assurer que le prix n'est pas undefined
-            price: apiPlan.price !== undefined ? apiPlan.price : (defaultPlan?.price || 0)
-          };
-        });
+        console.log('✅ usePlans: Setting plans from API:', response.data.length, 'plans')
+        console.log('💰 usePlans: First plan price:', response.data[0]?.price)
+        setPlans(response.data)
       } else {
-        console.warn('⚠️ usePlans: API returned no valid data, using default plans')
+        console.warn('⚠️ usePlans: API returned no valid data, keeping default plans')
+        // Garder les plans par défaut initiaux
       }
-      
-      console.log('💰 usePlans: Final plans to set:', plansToSet.map(p => ({ id: p.id, price: p.price })))
-      setPlans(plansToSet)
-      
     } catch (error) {
       console.error('❌ usePlans: Error fetching plans:', error)
       toast.error('Erreur lors du chargement des plans')
-      // En cas d'erreur, TOUJOURS garder les plans par défaut
-      console.log('🔄 usePlans: Error, using default plans')
-      setPlans(defaultPlans)
+      // En cas d'erreur, garder les plans par défaut initiaux
     }
   }
 
@@ -214,28 +171,17 @@ export const usePlans = () => {
       return false
     }
 
-    // Résolution du plan avec repli : liste API → plans par défaut → free.
-    // Un plan_id inconnu (plan désactivé/renommé en base) ne doit JAMAIS
-    // laisser l'utilisateur sans plan détecté.
     const currentPlan = plans.find(p => p.id === profile.plan_id)
-      || defaultPlans.find(p => p.id === profile.plan_id)
-      || plans.find(p => p.id === 'free')
-      || defaultPlans[0]
-    console.log('🔍 usePlans: Current plan:', {
+    console.log('🔍 usePlans: Current plan:', { 
       found: !!currentPlan,
-      requested: profile.plan_id,
       planId: currentPlan?.id,
       planName: currentPlan?.name
     })
-
+    
     if (!currentPlan) {
       console.log('⚠️ usePlans: No current plan found, returning false')
       return false
     }
-
-    const isPro = currentPlan.id === 'starter' || currentPlan.id === 'business' || currentPlan.id === 'enterprise' || currentPlan.id === 'pro'
-    const isBusiness = currentPlan.id === 'business' || currentPlan.id === 'enterprise'
-    const isEnterprise = currentPlan.id === 'enterprise'
 
     // Vérifier l'accès aux fonctionnalités selon le plan
     let hasAccess = false;
@@ -247,16 +193,16 @@ export const usePlans = () => {
         hasAccess = true // Tous les plans ont l'email
         break;
       case 'contacts':
-        hasAccess = isPro
+        // Free n'a pas de contacts, Starter et Business oui
+        hasAccess = currentPlan.id === 'starter' || currentPlan.id === 'business'
         break;
       case 'calendar':
-        hasAccess = isPro
+        // Seulement Business a le calendrier
+        hasAccess = currentPlan.id === 'business'
         break;
       case 'finance':
-        hasAccess = isBusiness
-        break;
-      case 'pro':
-        hasAccess = isPro
+        // Seulement Business a la finance
+        hasAccess = currentPlan.id === 'business'
         break;
       case 'gmail':
         hasAccess = true // Tous les plans ont Gmail
@@ -264,22 +210,22 @@ export const usePlans = () => {
       case 'rag':
       case 'vector_store':
       case 'knowledge':
-        hasAccess = isBusiness
+        hasAccess = currentPlan.id === 'business' // Business uniquement
         break;
       case 'search':
       case 'web_search':
-        return currentPlan.limits.web_search || isEnterprise || false
+        return currentPlan.limits.web_search || false
       case 'api':
-        return currentPlan.limits.api_access || isBusiness || false
+        return currentPlan.limits.api_access || false
       case 'whitelabel':
       case 'white_label':
-        hasAccess = currentPlan.limits.white_label || isEnterprise || false
+        hasAccess = currentPlan.limits.white_label || false
         break;
       case 'unlimited_memory':
-        hasAccess = isBusiness
+        hasAccess = currentPlan.id === 'business'
         break;
       case 'custom_db':
-        hasAccess = isBusiness
+        hasAccess = currentPlan.id === 'business'
         break;
       default:
         hasAccess = false

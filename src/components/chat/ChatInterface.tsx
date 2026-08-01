@@ -11,18 +11,33 @@ import { motion, AnimatePresence } from 'motion/react'
 import { toast } from 'sonner'
 import { cn, formatCurrency } from '@/src/lib/utils'
 import { useFinanceAI } from '@/src/hooks/useFinanceAI'
+import { useCalendarAI } from '@/src/hooks/useCalendarAI'
+import { useBoubaAction } from '@/src/hooks/useBoubaAction'
+import { useFinanceStore } from '@/src/stores/financeStore'
+import { useCalendarStore } from '@/src/stores/calendarStore'
+import { useEmailStore } from '@/src/stores/emailStore'
+import { useContactStore } from '@/src/stores/contactStore'
 import { useDocumentStore, DOC_TYPE_LABELS, calcTotals } from '@/src/stores/documentStore'
 import type { DocType, SavedDocument } from '@/src/stores/documentStore'
 import { useCompanyStore } from '@/src/stores/companyStore'
 import { usePrefsStore } from '@/src/stores/prefsStore'
 
 const quickActions = [
-  { label: '📧 Emails non lus',     prompt: 'Montre-moi mes emails non lus du jour',   feature: 'gmail' },
-  { label: '📅 RDV du jour',        prompt: "Quels sont mes rendez-vous aujourd'hui ?",  feature: 'calendar' },
-  { label: '💰 Rapport financier',  prompt: 'Génère un rapport financier de ce mois',   feature: 'finance' },
-  { label: '👤 Ajouter contact',    prompt: "Aide-moi à ajouter un nouveau contact",    feature: 'contacts' },
-  { label: '📄 Créer une facture',  prompt: 'Je veux créer une facture pour un client', feature: 'finance' },
-  { label: '📊 Chiffre d\'affaires', prompt: "Quel est mon chiffre d'affaires ce mois ?", feature: 'finance' },
+  // Stratégie & Clients
+  { label: '🚀 Relancer prospects',   prompt: "Aide-moi à préparer des messages de relance pour mes prospects qui n'ont pas répondu.", feature: 'gmail',    accent: 'from-orange-400 to-red-500' },
+  { label: '🤝 Onboarding client',    prompt: "Je viens de signer un nouveau client, aide-moi à préparer son onboarding et les prochaines étapes.", feature: 'general',  accent: 'from-blue-400 to-indigo-600' },
+  
+  // Intelligence Quotidienne
+  { label: '📊 Récap complet',       prompt: "Fais-moi un récapitulatif complet de ma journée (Agenda, Emails, Finances)", feature: 'general', accent: 'from-primary to-violet-500' },
+  { label: '📧 Emails non lus',      prompt: 'Montre-moi mes emails non lus du jour et les priorités',    feature: 'gmail',    accent: 'from-rose-400 to-pink-500' },
+
+  // Calendrier & RDV
+  { label: '📅 RDV du jour',         prompt: "Quels sont mes rendez-vous aujourd'hui ?",  feature: 'calendar', accent: 'from-blue-400 to-sky-500' },
+  { label: '📅 Nouveau RDV',         prompt: "Aide-moi à planifier un nouveau rendez-vous avec un client", feature: 'calendar', accent: 'from-sky-400 to-cyan-500' },
+
+  // Finance & Documents
+  { label: '💰 Rapport financier',   prompt: 'Génère un rapport financier de ce mois',    feature: 'finance',  accent: 'from-emerald-400 to-green-500' },
+  { label: '📄 Créer un document',   prompt: 'Je veux créer une facture ou un devis pour un client',  feature: 'finance',  accent: 'from-amber-400 to-orange-500' },
 ]
 
 export default function ChatInterface() {
@@ -45,8 +60,16 @@ export default function ChatInterface() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Document generation from chat
-  const { generateDocument, generateMonthlyReport, isProcessing: isGeneratingDoc } = useFinanceAI()
+  // Finance actions from chat
+  const { generateDocument, generateMonthlyReport, processFinanceCommand, analyzeFinances, isProcessing: isGeneratingDoc } = useFinanceAI()
+  const { addTransaction, transactions: financeTransactions } = useFinanceStore()
+
+  // Data stores for AI context
+  const { processNaturalLanguageCommand } = useCalendarAI()
+  const calendarEvents = useCalendarStore(state => state.events)
+  const emails = useEmailStore(state => state.emails)
+  const contacts = useContactStore(state => state.contacts)
+  const { callBouba } = useBoubaAction()
   const { saveDocument } = useDocumentStore()
   const { company } = useCompanyStore()
   const { currency } = usePrefsStore()
@@ -129,7 +152,8 @@ export default function ChatInterface() {
 
   const detectDocIntent = (text: string): DocType | null => {
     const n = normText(text)
-    const createPattern = /\b(creer?|generer?|genere|faire?|nouveau|nouvelle|cree?)\b/
+    // Accept explicit create verbs OR "besoin d'un/d'une", "prepare", "redige", "etablis"
+    const createPattern = /\b(creer?|generer?|genere|faire?|nouveau|nouvelle|cree?|preparer?|prepare|rediger?|redige|etablir?|etablis|besoin\s+d[ue']|donne[\s-]moi|fais[\s-]moi|j'?ai\s+besoin)\b/
     if (!createPattern.test(n)) return null
     for (const { pattern, type } of DOC_INTENT) {
       if (pattern.test(n)) return type
@@ -139,6 +163,248 @@ export default function ChatInterface() {
 
   const isReportIntent = (text: string): boolean =>
     /rapport.*(financier|mensuel|mois)|bilan.*(financier|mois)/i.test(normText(text))
+
+  // Detect explicit transaction recording intent ("enregistre une dépense", "j'ai payé", etc.)
+  const detectTransactionIntent = (text: string): boolean => {
+    const n = normText(text)
+    const actionPattern = /\b(enregistr|note\s+une?|ajoute?\s+une?\s+(depense|recette|revenu|transaction)|j'?ai\s+(paye|depense|recu|encaisse|gagne))\b/
+    const financePattern = /\b(depense|recette|revenu|transaction|paiement|loyer|salaire|vente|prestation|achat)\b/
+    return actionPattern.test(n) && financePattern.test(n)
+  }
+
+  // ── Data-query intent detectors ────────────────────────────────────
+  // Enhanced with client-friendly patterns and natural language variations
+
+  const isCalendarQuery = (text: string): boolean => {
+    const n = normText(text)
+    // Core calendar terms
+    const core = /\b(agenda|calendrier|planning|rdv|rendez.?vous|reunion|seance|evenement|semaine|journee|aujourd.?hui|demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|matin|apres.?midi|prochain.{0,10}(rdv|evenement|reunion)|creneau|dispo|disponible|planifie|planifier|programme|emploi du temps)\b/.test(n)
+    // Exclude finance-related
+    const exclude = /\b(facture|devis|recu|paiement|depense|revenu|transaction)\b/.test(n)
+    return core && !exclude
+  }
+
+  const isEmailQuery = (text: string): boolean => {
+    const n = normText(text)
+    // Email terms including compose, send, reply patterns
+    return /\b(email|mail|gmail|inbox|boite|non.?lu|unread|courrier|courriel|message.{0,15}(recu|envoye|nouveau)|envoie[r]?|redige[r]?|repond[r]?|relance[r]?|destinataire|expediteur|objet|piece jointe|annexe)\b/.test(n)
+  }
+
+  const isFinanceQuery = (text: string): boolean => {
+    const n = normText(text)
+    // Broadened to catch more natural finance questions
+    return /\b(depense|revenu|solde|chiffre.?d.?affaires|ca|argent|budget|transaction|combien.{0,25}(depense|gagne|encaiss|coute)|combien.{0,15}(ai|j.?ai).{0,15}(depense|gagne)|analyse.{0,10}(finance|depens)|mes\s+finances|situation\s+financiere|benefice|marge|tresorerie|facture|devis|recu|bon de commande|livraison|paie|salaire|loyer|impot|taxe)\b/.test(n)
+  }
+
+  const isContactQuery = (text: string): boolean => {
+    const n = normText(text)
+    // Contact terms including search, find, add patterns
+    return /\b(contact|carnet|annuaire|coordonnee|cherche.{0,20}(personne|nom|quelqu)|qui\s+est|liste.{0,10}contact|mes\s+contacts|trouve[r]?|recherche[r]?|ajoute[r]?|nouveau contact|nouvelle contact|telephone|mobile|portable|email contact)\b/.test(n)
+  }
+
+  const isDataRecapRequest = (text: string): boolean => {
+    const n = normText(text)
+    // Daily/weekly recap patterns
+    return /\b(recap|recapitulatif|bilan\s+(complet|global|journalier|hebdo|de\s+(ma\s*)?journee|de\s*(la\s*)?semaine)|resume\s+(complet|de\s*(ma\s*)?journee|de\s*(la\s*)?semaine|global|de\s*tout)|vue.?d.?ensemble|fais.?le.?point|quoi\s+de\s+neuf|que\s+se\s+passe|donne.?moi.{0,15}(resume|recap|bilan)|rapport\s+(journalier|hebdo)|synthese|point de la journee|nouvelles)\b/.test(n)
+  }
+
+  // ── Client interaction helpers ────────────────────────────────────
+  // Detect client-specific scenarios
+
+  const isClientFollowUp = (text: string): boolean => {
+    const n = normText(text)
+    const followWords = /\b(relance|relancer|rappel|rappeler|suivi|follow.?up|check|verifie|verification|statut|avancement|nouvelles|retour|reponse|attend|attends|attendant)\b/
+    const clientWords = /\b(client|prospect|partenaire|fournisseur|contact|dossier|projet|contrat|devis|opportunite|lead)\b/
+    return followWords.test(n) && clientWords.test(n)
+  }
+
+  const isClientOnboarding = (text: string): boolean => {
+    const n = normText(text)
+    const onboardingWords = /\b(nouveau client|nouvelle cliente|onboarding|integration|bienvenue|kickoff|lancement|demarrage|premiere reunion|contrat signe|commence|debuter|accueillir|signer|signature)\b/
+    return onboardingWords.test(n)
+  }
+
+  const isInvoiceRequest = (text: string): boolean => {
+    const n = normText(text)
+    return detectDocIntent(n) !== null || /\b(facture|devis|recu|proforma|bon de commande|bon de livraison|fiche de paie)\b/.test(n)
+  }
+
+  const handleTransactionFromChat = async (text: string) => {
+    if (!currentSessionId) {
+      try { await createNewSession() } catch { toast.error('Erreur lors de la création de la conversation'); return }
+    }
+    useChatStore.getState().addMessage({ role: 'user', content: text })
+    useChatStore.getState().addMessage({ role: 'assistant', content: '⏳ Enregistrement de la transaction…', agent: 'FINANCE' })
+
+    const result = await processFinanceCommand(text)
+    if (result.success) {
+      if (result.data) {
+        await addTransaction(result.data)
+        const label = result.data.type === 'income' ? 'Revenu' : 'Dépense'
+        useChatStore.getState().addMessage({
+          role: 'assistant',
+          content: result.boubaMessage
+            || `✅ **${label}** de **${formatCurrency(result.data.amount, currency)}** enregistré(e) !\n\n**Catégorie :** ${result.data.category}\n**Description :** ${result.data.description}\n**Date :** ${result.data.date}\n\nRetrouvez-la dans **Finance → Transactions**.`,
+          agent: 'FINANCE',
+          suggestions: ['Ajouter une autre transaction', 'Voir mes finances', 'Générer un rapport financier'],
+        })
+        toast.success(`${label} enregistré(e) : ${formatCurrency(result.data.amount, currency)}`)
+      } else {
+        useChatStore.getState().addMessage({
+          role: 'assistant',
+          content: result.boubaMessage
+            || "Je n'ai pas pu extraire les données. Essaie : *\"Enregistre une dépense de 50 000 pour le loyer\"*.",
+          agent: 'FINANCE',
+        })
+      }
+    } else {
+      useChatStore.getState().addMessage({
+        role: 'assistant',
+        content: `Désolé, je n'ai pas pu enregistrer cette transaction. ${result.error || ''}`,
+        agent: 'FINANCE',
+      })
+    }
+  }
+
+  // ── Data-aware handlers ────────────────────────────────────────────
+  const handleCalendarQueryFromChat = async (text: string) => {
+    if (!currentSessionId) {
+      try { await createNewSession() } catch { toast.error('Erreur lors de la création de la conversation'); return }
+    }
+    useChatStore.getState().addMessage({ role: 'user', content: text })
+    useChatStore.getState().addMessage({ role: 'assistant', content: '⏳ Je consulte votre calendrier…', agent: 'CALENDAR', isStreaming: true })
+    const result = await processNaturalLanguageCommand(text)
+    const response = result.boubaMessage || result.error || "Je n'ai trouvé aucun événement correspondant dans votre calendrier."
+    useChatStore.getState().finalizeLastMessage(response, ['Voir mon agenda', 'Ajouter un événement', 'Récap de la semaine'])
+  }
+
+  const handleEmailQueryFromChat = async (text: string) => {
+    if (!currentSessionId) {
+      try { await createNewSession() } catch { toast.error('Erreur lors de la création de la conversation'); return }
+    }
+    useChatStore.getState().addMessage({ role: 'user', content: text })
+    useChatStore.getState().addMessage({ role: 'assistant', content: '⏳ Je consulte votre boîte mail…', agent: 'EMAIL', isStreaming: true })
+    const today = new Date().toISOString().slice(0, 10)
+    const inboxEmails = emails.filter(e => e.folder === 'inbox').slice(0, 20)
+    const unreadCount = inboxEmails.filter(e => !e.read).length
+    const emailContext = [
+      '[DONNÉES EMAILS]',
+      `Date actuelle : ${today}`,
+      `Boîte de réception : ${inboxEmails.length} email(s), dont ${unreadCount} non lu(s)`,
+      'Emails récents :',
+      inboxEmails.slice(0, 15).map(e =>
+        `- [${e.read ? 'lu' : 'NON LU'}${e.isUrgent ? ' URGENT' : ''}] "${e.subject}" — De: ${e.from} — ${e.date}`
+      ).join('\n') || '  Aucun email en boîte de réception (synchronisez vos emails dans la page Email)',
+    ].join('\n')
+    const result = await callBouba(text, emailContext)
+    const response = result.success ? result.output : (result.error || "Je n'ai pas pu consulter vos emails.")
+    useChatStore.getState().finalizeLastMessage(response, ['Voir mes emails', 'Emails non lus', 'Rédiger un email'])
+  }
+
+  const handleContactQueryFromChat = async (text: string) => {
+    if (!currentSessionId) {
+      try { await createNewSession() } catch { toast.error('Erreur lors de la création de la conversation'); return }
+    }
+    useChatStore.getState().addMessage({ role: 'user', content: text })
+    useChatStore.getState().addMessage({ role: 'assistant', content: '⏳ Je consulte vos contacts…', agent: 'CONTACT', isStreaming: true })
+    const contactContext = [
+      '[DONNÉES CONTACTS]',
+      `Nombre total de contacts : ${contacts.length}`,
+      contacts.length > 0 ? 'Liste des contacts :' : 'Aucun contact enregistré.',
+      contacts.slice(0, 30).map(c =>
+        `- ${c.name}${c.company ? ` (${c.company})` : ''}${c.position ? ` — ${c.position}` : ''} — ${c.email || 'pas d\'email'}${c.phone ? ` | ${c.phone}` : ''}`
+      ).join('\n'),
+    ].join('\n')
+    const result = await callBouba(text, contactContext)
+    const response = result.success ? result.output : (result.error || "Je n'ai pas pu consulter vos contacts.")
+    useChatStore.getState().finalizeLastMessage(response, ['Voir mes contacts', 'Ajouter un contact'])
+  }
+
+  const handleFinanceQueryFromChat = async (text: string) => {
+    if (!currentSessionId) {
+      try { await createNewSession() } catch { toast.error('Erreur lors de la création de la conversation'); return }
+    }
+    useChatStore.getState().addMessage({ role: 'user', content: text })
+    useChatStore.getState().addMessage({ role: 'assistant', content: '⏳ Analyse de vos finances en cours…', agent: 'FINANCE', isStreaming: true })
+    const response = await analyzeFinances(text)
+    useChatStore.getState().finalizeLastMessage(response, ['Générer un rapport', 'Voir mes transactions', 'Ajouter une dépense'])
+  }
+
+  const handleFullRecapFromChat = async (text: string) => {
+    if (!currentSessionId) {
+      try { await createNewSession() } catch { toast.error('Erreur lors de la création de la conversation'); return }
+    }
+    useChatStore.getState().addMessage({ role: 'user', content: text })
+    useChatStore.getState().addMessage({ role: 'assistant', content: '⏳ Je prépare votre récapitulatif complet…', isStreaming: true })
+
+    const today = new Date()
+    const todayISO = today.toISOString().slice(0, 10)
+    // Week: Monday to Sunday
+    const weekStart = new Date(today)
+    weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7))
+    weekStart.setHours(0, 0, 0, 0)
+    const weekEnd = new Date(weekStart)
+    weekEnd.setDate(weekStart.getDate() + 6)
+    weekEnd.setHours(23, 59, 59, 999)
+
+    const todayEvents = calendarEvents.filter(e => e.start.startsWith(todayISO))
+    const weekEvents = calendarEvents.filter(e => { const d = new Date(e.start); return d >= weekStart && d <= weekEnd })
+    const inboxEmails = emails.filter(e => e.folder === 'inbox')
+    const unreadEmails = inboxEmails.filter(e => !e.read)
+    const income = financeTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+    const expense = financeTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+
+    const fullContext = [
+      `[RÉCAPITULATIF COMPLET — ${today.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}]`,
+      '',
+      '📅 CALENDRIER',
+      `Événements aujourd'hui (${todayISO}) : ${todayEvents.length}`,
+      todayEvents.length > 0
+        ? todayEvents.map(e => `  - "${e.title}" à ${new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}${e.location ? ` @ ${e.location}` : ''}`).join('\n')
+        : "  Aucun événement aujourd'hui",
+      `Événements cette semaine : ${weekEvents.length}`,
+      weekEvents.slice(0, 8).map(e => `  - "${e.title}" le ${e.start.slice(0, 10)} à ${new Date(e.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`).join('\n'),
+      '',
+      '📧 EMAILS',
+      `Emails non lus : ${unreadEmails.length} (sur ${inboxEmails.length} en boîte de réception)`,
+      unreadEmails.slice(0, 5).map(e => `  - "${e.subject}" — De: ${e.from} (${e.date})`).join('\n') || '  Aucun email non lu',
+      '',
+      '💰 FINANCES',
+      `Revenus enregistrés : ${income.toLocaleString('fr-FR')}`,
+      `Dépenses enregistrées : ${expense.toLocaleString('fr-FR')}`,
+      `Solde net : ${(income - expense).toLocaleString('fr-FR')}`,
+      financeTransactions.slice(0, 5).map(t => `  - ${t.type === 'income' ? '+' : '-'}${t.amount} ${t.category} (${t.date})`).join('\n'),
+      '',
+      '👤 CONTACTS',
+      `Nombre de contacts enregistrés : ${contacts.length}`,
+    ].join('\n')
+
+    const result = await callBouba(text, fullContext)
+    const response = result.success ? result.output : (result.error || "Je n'ai pas pu préparer votre récapitulatif.")
+    useChatStore.getState().finalizeLastMessage(response, ['Voir mon agenda', 'Voir mes emails', 'Rapport financier'])
+  }
+
+  // ── Client follow-up helper ─────────────────────────────────────
+  const handleClientFollowUp = async (text: string) => {
+    if (!currentSessionId) {
+      try { await createNewSession() } catch { toast.error('Erreur lors de la création de la conversation'); return }
+    }
+    useChatStore.getState().addMessage({ role: 'user', content: text })
+    useChatStore.getState().addMessage({ role: 'assistant', content: '⏳ Je prépare ta relance client…', agent: 'GENERAL', isStreaming: true })
+
+    const contactContext = [
+      '[CONTEXTE CLIENT]',
+      `Contacts disponibles: ${contacts.length}`,
+      contacts.slice(0, 20).map(c => `- ${c.name}${c.company ? ` (${c.company})` : ''} — ${c.email || c.phone}`).join('\n'),
+    ].join('\n')
+
+    const result = await callBouba(
+      text + "\n\nGénère un template de message de relance professionnel et chaleureux.",
+      contactContext
+    )
+    const response = result.success ? result.output : (result.error || "Je n'ai pas pu préparer ta relance.")
+    useChatStore.getState().finalizeLastMessage(response, ['Envoyer par email', 'Voir le contact', 'Autre relance'])
+  }
 
   const handleReportFromChat = async () => {
     if (!currentSessionId) {
@@ -200,6 +466,20 @@ export default function ChatInterface() {
     if (!input.trim() || isLoading || isGeneratingDoc) return
     if (isOverLimit) { toast.error('Limite de messages atteinte. Mettez à niveau votre plan.'); return }
 
+    // Client follow-up (relance, suivi client)
+    if (isClientFollowUp(input)) {
+      setInput('')
+      handleClientFollowUp(input)
+      return
+    }
+
+    // Client onboarding (nouveau client, kickoff)
+    if (isClientOnboarding(input)) {
+      setInput('')
+      handleFullRecapFromChat(input) // Use recap as base for onboarding
+      return
+    }
+
     if (isReportIntent(input)) {
       setInput('')
       handleReportFromChat()
@@ -214,10 +494,13 @@ export default function ChatInterface() {
       return
     }
 
-    if (!currentSessionId) {
-      try { await createNewSession() }
-      catch { toast.error('Erreur lors de la création de la conversation'); return }
+    if (detectTransactionIntent(input)) {
+      const cmd = input
+      setInput('')
+      handleTransactionFromChat(cmd)
+      return
     }
+
     sendMessage(input)
     setInput('')
   }
@@ -228,6 +511,12 @@ export default function ChatInterface() {
       return
     }
     if (isOverLimit) { toast.error('Limite de messages atteinte.'); return }
+
+    // Client follow-up
+    if (isClientFollowUp(action.prompt)) {
+      handleClientFollowUp(action.prompt)
+      return
+    }
 
     if (isReportIntent(action.prompt)) {
       handleReportFromChat()
@@ -253,6 +542,9 @@ export default function ChatInterface() {
       handleSend()
     }
   }
+
+  // Callback stable : ne casse pas le memo des MessageBubble à chaque frappe
+  const handleSuggestionClick = useCallback((s: string) => { sendMessage(s) }, [sendMessage])
 
   const handleVoiceInput = useCallback(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -316,7 +608,7 @@ export default function ChatInterface() {
   }
 
   return (
-    <div className="flex h-full bg-[#F5F6FA] relative overflow-hidden">
+    <div className="flex h-full bg-gradient-to-br from-slate-50 via-gray-50 to-violet-50/30 relative overflow-hidden">
 
       {/* ── Sidebar Conversations ─────────────────────────────────── */}
       <AnimatePresence>
@@ -335,7 +627,7 @@ export default function ChatInterface() {
               className="fixed lg:relative inset-y-0 left-0 z-30 w-72 bg-white border-r border-gray-100 flex flex-col shadow-xl lg:shadow-none"
             >
               {/* Sidebar Header */}
-              <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="p-4 border-b border-gray-100/80 bg-gradient-to-r from-white to-slate-50/60 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 bg-primary/10 rounded-lg flex items-center justify-center">
                     <MessageSquare className="w-3.5 h-3.5 text-primary" />
@@ -417,7 +709,7 @@ export default function ChatInterface() {
                     className={cn(
                       "group relative rounded-xl px-3 py-2.5 cursor-pointer transition-all",
                       session.id === currentSessionId
-                        ? "bg-primary/8 border border-primary/15"
+                        ? "bg-gradient-to-r from-primary/8 to-violet-500/5 border border-primary/15"
                         : "hover:bg-gray-50"
                     )}
                     onClick={() => { if (editingSessionId !== session.id) { switchSession(session.id); setShowSessions(false) } }}
@@ -482,7 +774,7 @@ export default function ChatInterface() {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
         {/* Header */}
-        <div className="px-4 py-3 bg-white border-b border-gray-100 flex items-center justify-between shadow-sm">
+        <div className="px-4 py-3 bg-white/95 backdrop-blur-sm border-b border-gray-100/80 flex items-center justify-between shadow-[0_2px_12px_rgba(0,0,0,0.04)] sticky top-0 z-10">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowSessions(!showSessions)}
@@ -500,17 +792,25 @@ export default function ChatInterface() {
             </button>
 
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-primary to-violet-600 rounded-xl flex items-center justify-center shadow-sm">
-                <Sparkles className="w-4 h-4 text-white" />
+              <div className="relative">
+                <div className="w-8 h-8 bg-gradient-to-br from-primary to-violet-600 rounded-xl flex items-center justify-center shadow-sm">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border-2 border-white" />
+                </span>
               </div>
               <div>
                 <h2 className="font-bold text-gray-800 text-sm leading-tight truncate max-w-[180px]">
                   {currentSession?.title || 'Nouvelle conversation'}
                 </h2>
-                {activeAgent && (
+                {activeAgent ? (
                   <p className="text-[10px] text-primary font-semibold uppercase tracking-wide">
                     {activeAgent} agent actif…
                   </p>
+                ) : (
+                  <p className="text-[10px] text-emerald-600 font-semibold">En ligne · Réponse instantanée</p>
                 )}
               </div>
             </div>
@@ -544,10 +844,14 @@ export default function ChatInterface() {
                 transition={{ type: 'spring', stiffness: 200 }}
                 className="relative"
               >
-                <div className="w-20 h-20 bg-gradient-to-br from-primary to-violet-600 rounded-3xl flex items-center justify-center text-white shadow-[0_8px_32px_rgba(108,62,244,0.35)]">
+                <div className="absolute -inset-4 bg-gradient-to-br from-primary/20 to-violet-600/20 rounded-[2.5rem] blur-2xl" />
+                <div className="w-20 h-20 bg-gradient-to-br from-primary to-violet-600 rounded-3xl flex items-center justify-center text-white shadow-[0_8px_32px_rgba(108,62,244,0.4)] relative">
                   <Sparkles className="w-10 h-10" />
                 </div>
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-400 rounded-full border-2 border-white" />
+                <span className="absolute -bottom-1 -right-1 flex h-5 w-5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-5 w-5 bg-emerald-500 border-2 border-white shadow-sm" />
+                </span>
               </motion.div>
 
               <div className="space-y-2">
@@ -591,29 +895,32 @@ export default function ChatInterface() {
                   return (
                     <motion.button
                       key={action.label}
-                      whileHover={{ scale: hasAccess && !isOverLimit ? 1.02 : 1 }}
+                      whileHover={{ scale: hasAccess && !isOverLimit ? 1.02 : 1, y: hasAccess && !isOverLimit ? -2 : 0 }}
                       whileTap={{ scale: hasAccess && !isOverLimit ? 0.97 : 1 }}
                       onClick={() => hasAccess ? handleQuickAction(action) : null}
                       disabled={!hasAccess || isOverLimit}
                       className={cn(
-                        "p-3.5 border rounded-2xl text-left transition-all group relative bg-white",
+                        "p-3.5 border rounded-2xl text-left transition-all group relative bg-white overflow-hidden",
                         hasAccess && !isOverLimit
-                          ? "border-gray-100 hover:border-primary/30 hover:shadow-md cursor-pointer"
+                          ? "border-gray-100 hover:border-transparent hover:shadow-lg cursor-pointer"
                           : "border-gray-100 cursor-not-allowed opacity-50"
                       )}
                     >
+                      {hasAccess && !isOverLimit && (
+                        <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${action.accent} opacity-60 group-hover:opacity-100 transition-opacity`} />
+                      )}
                       <div className="flex items-start justify-between gap-1 mb-1">
                         <p className={cn(
                           "text-sm font-semibold leading-snug",
                           hasAccess && !isOverLimit
-                            ? "text-gray-700 group-hover:text-primary"
+                            ? "text-gray-700 group-hover:text-gray-900"
                             : "text-gray-400"
                         )}>
                           {action.label}
                         </p>
                         {!hasAccess && <Lock className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />}
                       </div>
-                      <p className="text-[11px] text-gray-400">
+                      <p className="text-[11px] text-gray-400 group-hover:text-gray-500 transition-colors">
                         {!hasAccess ? 'Plan Pro+' : isOverLimit ? 'Limite atteinte' : 'Appuyer pour envoyer'}
                       </p>
                     </motion.button>
@@ -626,7 +933,7 @@ export default function ChatInterface() {
               <MessageBubble
                 key={msg.id}
                 {...msg}
-                onSuggestionClick={(s) => sendMessage(s)}
+                onSuggestionClick={handleSuggestionClick}
               />
             ))
           )}
@@ -638,10 +945,10 @@ export default function ChatInterface() {
               animate={{ opacity: 1, y: 0 }}
               className="flex items-center gap-3 ml-12 mb-2"
             >
-              <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center gap-2.5">
-                <div className="flex gap-1">
-                  {[0, 0.15, 0.3].map((delay, i) => (
-                    <span key={i} className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: `${delay}s` }} />
+              <div className="bg-white border border-gray-100/80 rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-[0_4px_20px_rgba(0,0,0,0.06)] flex items-center gap-3">
+                <div className="flex gap-1.5 items-center">
+                  {[0, 0.2, 0.4].map((delay, i) => (
+                    <span key={i} className="w-2 h-2 bg-gradient-to-br from-primary to-violet-500 rounded-full animate-bounce" style={{ animationDelay: `${delay}s` }} />
                   ))}
                 </div>
                 <span className="text-xs font-semibold text-gray-500">
@@ -655,7 +962,7 @@ export default function ChatInterface() {
         {/* ── Document Card Overlay ──────────────────────────────── */}
         <AnimatePresence>
           {(isGeneratingDoc || docCard) && (
-            <div className="px-4 pt-2 bg-[#F5F6FA]">
+            <div className="px-4 pt-2 bg-gradient-to-t from-slate-50/80 to-transparent">
               <div className="max-w-3xl mx-auto">
                 <motion.div
                   initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
@@ -704,13 +1011,13 @@ export default function ChatInterface() {
         </AnimatePresence>
 
         {/* ── Input Area ─────────────────────────────────────────── */}
-        <div className="px-4 pb-4 pt-2 bg-[#F5F6FA]">
+        <div className="px-4 pb-4 pt-2 bg-gradient-to-t from-slate-50/80 to-transparent">
           <div className="max-w-3xl mx-auto">
             <div className={cn(
-              "bg-white rounded-2xl border transition-all shadow-sm",
+              "bg-white rounded-2xl border transition-all",
               isListening
-                ? "border-red-300 ring-2 ring-red-100"
-                : "border-gray-200 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10"
+                ? "border-red-300 ring-2 ring-red-100 shadow-[0_4px_16px_rgba(239,68,68,0.10)]"
+                : "border-gray-200 shadow-[0_4px_20px_rgba(0,0,0,0.07)] focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 focus-within:shadow-[0_4px_20px_rgba(108,62,244,0.10)]"
             )}>
               <div className="flex items-end gap-2 px-3 py-2">
                 <textarea
@@ -740,9 +1047,9 @@ export default function ChatInterface() {
                     onClick={handleSend}
                     disabled={!input.trim() || isLoading || isOverLimit || isGeneratingDoc}
                     className={cn(
-                      "p-2 rounded-xl transition-all",
+                      "p-2.5 rounded-xl transition-all",
                       input.trim() && !isLoading && !isOverLimit && !isGeneratingDoc
-                        ? "bg-gradient-to-br from-primary to-violet-600 text-white shadow-sm hover:shadow-md hover:scale-105"
+                        ? "bg-gradient-to-br from-primary to-violet-600 text-white shadow-[0_4px_12px_rgba(108,62,244,0.35)] hover:shadow-[0_6px_16px_rgba(108,62,244,0.40)] hover:scale-105 active:scale-95"
                         : "bg-gray-100 text-gray-400 cursor-not-allowed"
                     )}
                   >

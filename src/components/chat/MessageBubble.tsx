@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -17,6 +17,8 @@ interface MessageBubbleProps {
   isStreaming?: boolean
   suggestions?: string[]
   feedback?: 'up' | 'down'
+  /** true = message d'erreur (agent en échec) — bulle rouge distincte */
+  isError?: boolean
   onSuggestionClick?: (suggestion: string) => void
 }
 
@@ -222,24 +224,33 @@ const agentConfig: Record<string, { label: string; icon: any; bg: string; text: 
   FINANCE:  { label: 'Finance',  icon: DollarSign, bg: 'bg-green-50',  text: 'text-green-700' },
   CONTACT:  { label: 'Contact',  icon: FileText,   bg: 'bg-purple-50', text: 'text-purple-600' },
   GENERAL:  { label: 'Bouba',    icon: Sparkles,   bg: 'bg-primary/8', text: 'text-primary' },
+  ADMIN:    { label: 'Admin',    icon: Sparkles,   bg: 'bg-amber-50',  text: 'text-amber-700' },
 }
 
 // ── Main component ──────────────────────────────────────────────────────
 
-export default function MessageBubble({
-  id, role, content, timestamp, agent, isStreaming, suggestions, feedback, onSuggestionClick
+// memo : évite de re-parser le Markdown et les cartes riches de TOUS les
+// messages à chaque frappe dans l'input du chat (perf saisie).
+export default memo(function MessageBubble({
+  id, role, content, timestamp, agent, isStreaming, suggestions, feedback, isError, onSuggestionClick
 }: MessageBubbleProps) {
   const isUser = role === 'user'
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp)
   const { setFeedback } = useChatStore()
   const [copied, setCopied] = useState(false)
 
-  const emailCard    = !isUser ? detectEmailCard(content)    : null
-  const calendarCard = !isUser ? detectCalendarCard(content) : null
-  const financeCard  = !isUser ? detectFinanceCard(content)  : null
-  const cleanContent = (!isUser && (emailCard || calendarCard || financeCard))
-    ? stripRichBlocks(content)
-    : content
+  // Détecteurs de cartes riches (regex) mémoïsés par contenu
+  const { emailCard, calendarCard, financeCard, cleanContent } = useMemo(() => {
+    const email    = !isUser ? detectEmailCard(content)    : null
+    const calendar = !isUser ? detectCalendarCard(content) : null
+    const finance  = !isUser ? detectFinanceCard(content)  : null
+    return {
+      emailCard: email,
+      calendarCard: calendar,
+      financeCard: finance,
+      cleanContent: (!isUser && (email || calendar || finance)) ? stripRichBlocks(content) : content,
+    }
+  }, [isUser, content])
 
   const agentKey  = agent?.toUpperCase() || 'GENERAL'
   const agentInfo = agentConfig[agentKey] || agentConfig['GENERAL']
@@ -260,10 +271,10 @@ export default function MessageBubble({
     >
       {/* Avatar */}
       <div className={cn(
-        "w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm mt-0.5",
+        "w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 mt-0.5",
         isUser
-          ? "bg-gradient-to-br from-primary to-violet-600 text-white"
-          : "bg-white border border-border text-primary shadow-card"
+          ? "bg-gradient-to-br from-primary to-violet-600 text-white shadow-[0_4px_12px_rgba(108,62,244,0.30)]"
+          : "bg-white border border-gray-100 text-primary shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
       )}>
         {isUser ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
       </div>
@@ -273,11 +284,19 @@ export default function MessageBubble({
 
         {/* Bubble */}
         <div className={cn(
-          "px-4 py-3 rounded-2xl shadow-sm min-w-0",
+          "px-4 py-3.5 rounded-2xl min-w-0",
           isUser
-            ? "bg-gradient-to-br from-primary to-violet-600 text-white rounded-tr-sm"
-            : "bg-white border border-gray-100 text-gray-800 rounded-tl-sm shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
+            ? "bg-gradient-to-br from-primary via-violet-600 to-violet-700 text-white rounded-tr-sm shadow-[0_4px_16px_rgba(108,62,244,0.28)]"
+            : isError
+              ? "bg-red-50 border border-red-200 text-red-800 rounded-tl-sm shadow-[0_4px_20px_rgba(220,38,38,0.08)]"
+              : "bg-white border border-gray-100/80 text-gray-800 rounded-tl-sm shadow-[0_4px_20px_rgba(0,0,0,0.07)]"
         )}>
+          {/* Bandeau erreur — jamais confondu avec une réponse normale */}
+          {!isUser && isError && (
+            <div className="inline-flex items-center gap-1.5 mb-2.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-700">
+              ⚠️ Erreur
+            </div>
+          )}
           {/* Agent badge — assistant only */}
           {!isUser && agent && (
             <div className={cn(
@@ -315,7 +334,7 @@ export default function MessageBubble({
           <div className="flex flex-wrap gap-1.5 mt-2">
             {suggestions.map((s, i) => (
               <button key={i} onClick={() => onSuggestionClick?.(s)}
-                className="px-3 py-1.5 bg-white border border-primary/20 rounded-full text-[11px] font-semibold text-primary hover:bg-primary hover:text-white hover:border-primary transition-all flex items-center gap-1.5 shadow-sm">
+                className="px-3.5 py-1.5 bg-white border border-primary/25 rounded-full text-[11px] font-semibold text-primary hover:bg-primary hover:text-white hover:border-primary transition-all flex items-center gap-1.5 shadow-sm hover:shadow-md hover:scale-[1.02]">
                 <Sparkles className="w-3 h-3" />{s}
               </button>
             ))}
@@ -358,4 +377,4 @@ export default function MessageBubble({
       </div>
     </motion.div>
   )
-}
+})
